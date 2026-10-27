@@ -551,4 +551,25 @@ mod tests {
             "O router deveria preferir o handler HEAD explícito"
         );
     }
+
+    #[test]
+    fn detects_allowed_methods_for_dynamic_route() {
+        let mut router = Router::new();
+
+        router
+            .add(Method::GET, "/utilizadores/:id", |_, response| {
+                response.send("Detalhes do utilizador")
+            })
+            .expect("A rota GET deveria ser registada");
+
+        router
+            .add(Method::DELETE, "/utilizadores/:id", |_, response| {
+                response.send("Utilizador eliminado")
+            })
+            .expect("A rota DELETE deveria ser registada");
+
+        let methods = router.allowed_methods("/utilizadores/42");
+
+        assert_eq!(methods, vec![Method::DELETE, Method::GET, Method::HEAD]);
+    }
 }
