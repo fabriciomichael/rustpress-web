@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{titulo}}</title>
+    <style>
+        body {
+            background-color: aqua;
+            font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+        }
+
+        h1{
+            color: brown;
+        }
+    </style>
+</head>
+<body>
+
+    {{> header}}
+
+    <main>
+        {{{conteudo}}}
+    </main>
+
+    {{> footer}}
+
+</body>
+</html>
