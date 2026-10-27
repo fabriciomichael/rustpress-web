@@ -191,6 +191,25 @@ impl Router {
         None
     }
 
+    fn error_response(&self, code: u16) -> Response {
+        let mut context = TemplateContext::new();
+
+        let (title, page_path) = match code {
+            404 => ("404 - Página não encontrada", "views/errors/404.html"),
+            405 => ("405 - Método não permitido", "views/errors/405.html"),
+            _ => ("500 - Erro interno do servidor", "views/errors/500.html"),
+        };
+
+        context.set("titulo", title.into());
+
+        Response::error_page(
+            code,
+            page_path,
+            "views/layouts/main.html",
+            "views/partials",
+            &context,
+        )
+    }
     /// Processa uma requisição HTTP e devolve a resposta correspondente.
     ///
     /// A lógica faz as seguintes etapas:
@@ -237,33 +256,12 @@ impl Router {
                     .collect::<Vec<_>>()
                     .join(", ");
 
-                let mut context = TemplateContext::new();
-                context.set("titulo", "405 - Método não permitido".into());
-
-                Response::error_page(
-                    405,
-                    "views/errors/405.html",
-                    "views/layouts/main.html",
-                    "views/partials",
-                    &context,
-                )
-                .header("Allow", &allow)
-                .into_hyper()
+                self.error_response(405)
+                    .header("Allow", &allow)
+                    .into_hyper()
             }
 
-            None => {
-                let mut context = TemplateContext::new();
-                context.set("titulo", "404 - Página não encontrada".into());
-
-                Response::error_page(
-                    404,
-                    "views/errors/404.html",
-                    "views/layouts/main.html",
-                    "views/partials",
-                    &context,
-                )
-                .into_hyper()
-            }
+            None => self.error_response(404).into_hyper(),
         };
 
         if method == Method::HEAD {

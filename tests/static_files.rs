@@ -91,6 +91,11 @@ fn request_dynamic_route_with_method(method: &str, path: &str) -> String {
     })
     .expect("Não foi possível registar a rota dinâmica");
 
+    app.post("/dinamico", |_req: Request, res: Response| {
+        res.send("Recurso criado")
+    })
+    .expect("Não foi possível registar a rota POST");
+
     let _server_thread = thread::spawn(move || {
         let runtime =
             tokio::runtime::Runtime::new().expect("Não foi possível criar o runtime Tokio");
@@ -313,5 +318,41 @@ fn head_returns_headers_without_dynamic_route_body() {
     assert!(
         response.to_ascii_lowercase().contains(&expected_header),
         "O Content-Length deveria corresponder a {expected_length} bytes:\n{response}"
+    );
+}
+
+#[test]
+fn returns_405_with_allow_header_for_unsupported_method() {
+    let response = request_dynamic_route_with_method("PUT", "/dinamico");
+
+    assert!(
+        response.contains("405 Method Not Allowed"),
+        "Era esperada uma resposta 405 Method Not Allowed:\n{response}"
+    );
+
+    let headers = response
+        .split_once("\r\n\r\n")
+        .map(|(headers, _)| headers)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    assert!(
+        headers.contains("allow: get, head, post"),
+        "O cabeçalho Allow deveria indicar GET, HEAD e POST:\n{response}"
+    );
+}
+
+#[test]
+fn returns_404_for_unknown_dynamic_route() {
+    let response = request_dynamic_route_with_method("GET", "/rota-inexistente");
+
+    assert!(
+        response.contains("404 Not Found"),
+        "Era esperada uma resposta 404 Not Found:\n{response}"
+    );
+
+    assert!(
+        !response.contains("405 Method Not Allowed"),
+        "Um caminho inexistente não deve devolver 405:\n{response}"
     );
 }

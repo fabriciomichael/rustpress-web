@@ -305,6 +305,10 @@ mod tests {
             String::from_utf8(response.body.to_vec()).expect("O corpo da resposta deve ser UTF-8");
 
         assert_eq!(body, "Erro HTTP 404");
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("text/plain; charset=utf-8")
+        );
     }
 
     #[test]
