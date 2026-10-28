@@ -79,6 +79,30 @@ impl App {
         self.router.add(Method::DELETE, path, handler)
     }
 
+    /// Regista um handler PUT que pode devolver um erro.
+    pub fn put_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        self.router.add_fallible(Method::PUT, path, handler)
+    }
+
+    /// Regista um handler PATCH que pode devolver um erro.
+    pub fn patch_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        self.router.add_fallible(Method::PATCH, path, handler)
+    }
+
+    /// Regista um handler DELETE que pode devolver um erro.
+    pub fn delete_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        self.router.add_fallible(Method::DELETE, path, handler)
+    }
+
     /// Adiciona um middleware global que é executado antes do handler da rota.
     ///
     /// Se o middleware devolver `Some(Response)`, a resposta é interrompida e a
@@ -234,6 +258,22 @@ impl App {
                 }
             }
         });
+    }
+
+    /// Regista um handler GET que pode devolver um erro.
+    pub fn get_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        self.router.add_fallible(Method::GET, path, handler)
+    }
+
+    /// Regista um handler POST que pode devolver um erro.
+    pub fn post_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        self.router.add_fallible(Method::POST, path, handler)
     }
 }
 

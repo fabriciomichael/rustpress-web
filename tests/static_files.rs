@@ -8,13 +8,7 @@ use std::{
 use rustpress::{App, Request, Response};
 use tokio::net::TcpListener;
 
-fn request_static_file(path: &str) -> String {
-    request_static_file_with_method("GET", path)
-}
-
-fn request_static_file_with_method(method: &str, path: &str) -> String {
-    // Mantém aqui o restante código actual de request_static_file(),
-    // desde a criação do listener até à leitura da resposta.
+fn request_with_app(app: App, method: &str, path: &str) -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("Não foi possível reservar uma porta livre");
 
@@ -25,9 +19,6 @@ fn request_static_file_with_method(method: &str, path: &str) -> String {
     let address = listener
         .local_addr()
         .expect("Não foi possível obter o endereço");
-
-    let mut app = App::new();
-    app.static_files("/assets", "public");
 
     let _server_thread = thread::spawn(move || {
         let runtime =
@@ -71,18 +62,19 @@ fn request_static_file_with_method(method: &str, path: &str) -> String {
     }
 }
 
+fn request_static_file(path: &str) -> String {
+    request_static_file_with_method("GET", path)
+}
+
+fn request_static_file_with_method(method: &str, path: &str) -> String {
+    let mut app = App::new();
+
+    app.static_files("/assets", "public");
+
+    request_with_app(app, method, path)
+}
+
 fn request_dynamic_route_with_method(method: &str, path: &str) -> String {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("Não foi possível reservar uma porta livre");
-
-    listener
-        .set_nonblocking(true)
-        .expect("Não foi possível configurar o listener");
-
-    let address = listener
-        .local_addr()
-        .expect("Não foi possível obter o endereço");
-
     let mut app = App::new();
 
     app.get("/dinamico", |_req: Request, res: Response| {
@@ -96,46 +88,61 @@ fn request_dynamic_route_with_method(method: &str, path: &str) -> String {
     })
     .expect("Não foi possível registar a rota POST");
 
-    let _server_thread = thread::spawn(move || {
-        let runtime =
-            tokio::runtime::Runtime::new().expect("Não foi possível criar o runtime Tokio");
+    request_with_app(app, method, path)
+}
 
-        runtime.block_on(async move {
-            let listener =
-                TcpListener::from_std(listener).expect("Não foi possível converter o listener");
+fn request_middleware_response() -> String {
+    let mut app = App::new();
 
-            app.serve_listener(listener)
-                .await
-                .expect("Erro no servidor de teste");
-        });
-    });
+    app.use_middleware(|_| None);
 
-    let deadline = Instant::now() + Duration::from_secs(10);
+    app.get("/middleware-teste", |_req: Request, res: Response| {
+        res.send("Handler executado")
+    })
+    .expect("Não foi possível registar a rota de teste");
 
-    loop {
-        if Instant::now() >= deadline {
-            panic!("O servidor não ficou disponível a tempo");
-        }
+    request_with_app(app, "GET", "/middleware-teste")
+}
 
-        if let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(200)) {
-            let request =
-                format!("{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
+fn request_middleware_short_circuit() -> String {
+    let mut app = App::new();
 
-            stream
-                .write_all(request.as_bytes())
-                .expect("Falha ao enviar pedido HTTP");
+    app.use_middleware(|_| Some(Response::new().status(401).send("Acesso negado")));
 
-            let mut response = String::new();
+    app.get("/middleware-teste", |_req: Request, res: Response| {
+        res.send("Handler executado")
+    })
+    .expect("Não foi possível registar a rota de teste");
 
-            stream
-                .read_to_string(&mut response)
-                .expect("Falha ao ler resposta HTTP");
+    request_with_app(app, "GET", "/middleware-teste")
+}
 
-            return response;
-        }
+fn request_fallible_route_with_method(method: &str) -> String {
+    let mut app = App::new();
 
-        thread::sleep(Duration::from_millis(50));
+    match method {
+        "PUT" => app
+            .put_fallible("/teste", |_req, _res| {
+                Err(std::io::Error::other("Erro de teste").into())
+            })
+            .expect("Erro ao registar PUT"),
+
+        "PATCH" => app
+            .patch_fallible("/teste", |_req, _res| {
+                Err(std::io::Error::other("Erro de teste").into())
+            })
+            .expect("Erro ao registar PATCH"),
+
+        "DELETE" => app
+            .delete_fallible("/teste", |_req, _res| {
+                Err(std::io::Error::other("Erro de teste").into())
+            })
+            .expect("Erro ao registar DELETE"),
+
+        _ => panic!("Método não suportado neste teste: {method}"),
     }
+
+    request_with_app(app, method, "/teste")
 }
 
 #[test]
@@ -354,5 +361,64 @@ fn returns_404_for_unknown_dynamic_route() {
     assert!(
         !response.contains("405 Method Not Allowed"),
         "Um caminho inexistente não deve devolver 405:\n{response}"
+    );
+}
+
+#[test]
+fn put_fallible_returns_500_without_leaking_error_details() {
+    let response = request_fallible_route_with_method("PUT");
+
+    assert!(response.contains("500 Internal Server Error"), "{response}");
+
+    assert!(
+        !response.contains("Erro de teste"),
+        "A resposta revelou detalhes internos: {response}"
+    );
+}
+
+#[test]
+fn patch_fallible_returns_500_when_handler_fails() {
+    let response = request_fallible_route_with_method("PATCH");
+    assert!(response.contains("500 Internal Server Error"), "{response}");
+}
+
+#[test]
+fn delete_fallible_returns_500_when_handler_fails() {
+    let response = request_fallible_route_with_method("DELETE");
+    assert!(response.contains("500 Internal Server Error"), "{response}");
+}
+
+#[test]
+fn middleware_none_allows_handler_to_continue() {
+    let response = request_middleware_response();
+
+    assert!(
+        response.contains("200 OK"),
+        "Esperava uma resposta HTTP 200, mas recebi:\n{response}"
+    );
+
+    assert!(
+        response.contains("Handler executado"),
+        "O middleware impediu inesperadamente a execução do handler:\n{response}"
+    );
+}
+
+#[test]
+fn middleware_response_stops_handler_execution() {
+    let response = request_middleware_short_circuit();
+
+    assert!(
+        response.contains("401 Unauthorized"),
+        "Esperava HTTP 401:\n{response}"
+    );
+
+    assert!(
+        response.contains("Acesso negado"),
+        "A resposta do middleware não foi devolvida:\n{response}"
+    );
+
+    assert!(
+        !response.contains("Handler executado"),
+        "O handler foi executado apesar da interrupção:\n{response}"
     );
 }

@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Cada página pode receber o seu próprio contexto, independente das restantes rotas.
     let mut profile: TemplateContext = TemplateContext::new();
-
+    profile.set("titulo", json!("Perfil"));
     profile.set("nome", json!("Luca"));
     profile.set("idade", json!(19));
 
@@ -39,6 +39,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
     })
     .expect("Não foi possível registar a rota GET /perfil");
+
+    app.get_fallible("/ficheiro", |_req, res| {
+        let conteudo = std::fs::read_to_string("dados.txt")?;
+
+        Ok(res.send(conteudo))
+    })
+    .expect("Não foi possível registar a rota GET /ficheiro");
 
     // Inicia o servidor no endereço indicado; esta chamada permanece activa enquanto
     // o servidor estiver em execução e propaga erros de inicialização ou ligação.

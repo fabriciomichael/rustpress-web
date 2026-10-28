@@ -226,6 +226,34 @@ impl Response {
         self
     }
 
+    /// Renderiza uma página com layout e validação rigorosa das variáveis.
+    ///
+    /// Devolve HTTP 500 quando uma variável não está definida ou ocorre
+    /// um erro ao carregar os templates ou os partials.
+    pub fn render_view_strict(
+        mut self,
+        page_path: &str,
+        layout_path: &str,
+        partials_dir: &str,
+        context: &TemplateContext,
+    ) -> Self {
+        match context.render_with_layout_strict(page_path, layout_path, partials_dir) {
+            Ok(html) => {
+                self.body = Bytes::from(html);
+                self.content_type = HeaderValue::from_static("text/html; charset=utf-8");
+            }
+            Err(error) => {
+                eprintln!("Erro ao renderizar a página (modo rigoroso): {error}");
+
+                self.status = StatusCode::INTERNAL_SERVER_ERROR;
+                self.body = Bytes::from("Erro interno ao renderizar a página.");
+                self.content_type = HeaderValue::from_static("text/plain; charset=utf-8");
+            }
+        }
+
+        self
+    }
+
     /// Renderiza uma página de erro personalizada usando um layout e partials.
     ///
     /// Se a renderização falhar, mantém o código HTTP original e devolve
@@ -335,5 +363,132 @@ mod tests {
 
             assert_eq!(body, format!("Erro HTTP {code}"));
         }
+    }
+
+    #[test]
+    fn render_view_strict_returns_500_for_undefined_variable() {
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let base = std::env::temp_dir().join(format!("rustpress-response-strict-{unique}"));
+
+        let partials = base.join("partials");
+        fs::create_dir_all(&partials).unwrap();
+
+        let page = base.join("pagina.html");
+        let layout = base.join("layout.html");
+
+        fs::write(&page, "<h1>{{usuario}}</h1>").unwrap();
+        fs::write(&layout, "<html><body>{{{conteudo}}}</body></html>").unwrap();
+
+        let context = TemplateContext::new();
+
+        let response = Response::new().render_view_strict(
+            page.to_str().unwrap(),
+            layout.to_str().unwrap(),
+            partials.to_str().unwrap(),
+            &context,
+        );
+
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn render_view_strict_returns_html_for_valid_template() {
+        use serde_json::json;
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let base = std::env::temp_dir().join(format!("rustpress-response-valid-{unique}"));
+
+        let partials = base.join("partials");
+        fs::create_dir_all(&partials).unwrap();
+
+        let page = base.join("pagina.html");
+        let layout = base.join("layout.html");
+
+        fs::write(&page, "<h1>{{titulo}}</h1>").unwrap();
+        fs::write(&layout, "<html><body>{{{conteudo}}}</body></html>").unwrap();
+
+        let mut context = TemplateContext::new();
+        context.set("titulo", json!("RustPress"));
+
+        let response = Response::new().render_view_strict(
+            page.to_str().unwrap(),
+            layout.to_str().unwrap(),
+            partials.to_str().unwrap(),
+            &context,
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("text/html; charset=utf-8")
+        );
+
+        let body = String::from_utf8(response.body.to_vec()).unwrap();
+        assert!(body.contains("<h1>RustPress</h1>"));
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn render_view_strict_returns_500_for_invalid_syntax() {
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let base = std::env::temp_dir().join(format!("rustpress-response-invalid-syntax-{unique}"));
+
+        let partials = base.join("partials");
+        fs::create_dir_all(&partials).unwrap();
+
+        let page = base.join("pagina.html");
+        let layout = base.join("layout.html");
+
+        // O bloco if está aberto e não tem fecho.
+        fs::write(&page, "<h1>{{#if titulo}}Olá</h1>").unwrap();
+        fs::write(&layout, "<html><body>{{{conteudo}}}</body></html>").unwrap();
+
+        let context = TemplateContext::new();
+
+        let response = Response::new().render_view_strict(
+            page.to_str().unwrap(),
+            layout.to_str().unwrap(),
+            partials.to_str().unwrap(),
+            &context,
+        );
+
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body = String::from_utf8(response.body.to_vec()).unwrap();
+
+        assert_eq!(body, "Erro interno ao renderizar a página.");
+        assert!(!body.contains("Erro de sintaxe"));
+        assert!(!body.contains("TemplateError"));
+
+        fs::remove_dir_all(&base).unwrap();
     }
 }

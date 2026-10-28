@@ -1,4 +1,49 @@
 use serde_json::{Map, Value};
+use std::fmt;
+
+#[derive(Debug)]
+pub enum TemplateError {
+    UndefinedVariable(String),
+    Syntax(String),
+    NestingLimitExceeded,
+    Io(std::io::Error),
+}
+
+impl fmt::Display for TemplateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UndefinedVariable(name) => {
+                write!(f, "Variable not defined in the template: {name}")
+            }
+            Self::Io(error) => {
+                write!(f, "I/O error in template: {error}")
+            }
+            Self::Syntax(message) => {
+                write!(f, "Syntax error in template: {message}")
+            }
+            Self::NestingLimitExceeded => {
+                write!(f, "Maximum template nesting depth exceeded.")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TemplateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::UndefinedVariable(_) => None,
+            Self::Syntax(_) => None,
+            Self::Io(error) => Some(error),
+            Self::NestingLimitExceeded => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for TemplateError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
 
 /// Contexto de dados disponibilizado ao template.
 #[derive(Debug, Clone, Default)]
@@ -27,12 +72,76 @@ impl TemplateContext {
         &self.data
     }
 
-    /// Renderiza variáveis e condições de um template.
+    /// Valida a estrutura dos blocos de um template sem o renderizar.
+    pub fn validate_template(template: &str) -> Result<(), TemplateError> {
+        validate_template_syntax(template)
+    }
 
+    /// Renderiza variáveis e condições de um template.
     pub fn render(&self, template: &str) -> String {
         let result = self.render_each(template);
         let result = self.render_conditions(&result);
         self.render_variables(&result)
+    }
+
+    /// Renderiza um template e devolve erro se uma variável não existir.
+    pub fn render_strict(&self, template: &str) -> Result<String, TemplateError> {
+        self.render_strict_with_depth(template, 0)
+    }
+
+    fn render_strict_with_depth(
+        &self,
+        template: &str,
+        depth: usize,
+    ) -> Result<String, TemplateError> {
+        const MAX_DEPTH: usize = 20;
+
+        if depth > MAX_DEPTH {
+            return Err(TemplateError::NestingLimitExceeded);
+        }
+
+        Self::validate_template(template)?;
+
+        let result = self.render_each_strict(template, depth)?;
+        let result = self.render_conditions_strict(&result, depth)?;
+
+        let mut output = String::new();
+        let mut position = 0;
+
+        while let Some(relative_start) = result[position..].find("{{") {
+            let start = position + relative_start;
+            output.push_str(&result[position..start]);
+
+            let value_start = start + 2;
+
+            let Some(relative_end) = result[value_start..].find("}}") else {
+                output.push_str(&result[start..]);
+                return Ok(output);
+            };
+
+            let end = value_start + relative_end;
+            let key = result[value_start..end].trim();
+
+            if !Self::is_valid_variable_name(key) {
+                output.push_str(&result[start..end + 2]);
+                position = end + 2;
+                continue;
+            }
+
+            match self.get(key) {
+                Some(value) => {
+                    output.push_str(&escape_html(&value_to_string(value)));
+                }
+                None => {
+                    return Err(TemplateError::UndefinedVariable(key.to_string()));
+                }
+            }
+
+            position = end + 2;
+        }
+
+        output.push_str(&result[position..]);
+        Ok(output)
     }
 
     /// Interpreta blocos if, else e /if, incluindo condições aninhadas.
@@ -83,6 +192,69 @@ impl TemplateContext {
         output
     }
 
+    /// Interpreta condições e rejeita variáveis inexistentes.
+    fn render_conditions_strict(
+        &self,
+        template: &str,
+        depth: usize,
+    ) -> Result<String, TemplateError> {
+        const MAX_DEPTH: usize = 20;
+
+        if depth > MAX_DEPTH {
+            return Err(TemplateError::NestingLimitExceeded);
+        }
+
+        let mut output = String::new();
+        let mut position = 0;
+
+        while let Some(relative_start) = template[position..].find("{{#if ") {
+            let start = position + relative_start;
+
+            output.push_str(&template[position..start]);
+
+            let opening_end = match template[start..].find("}}") {
+                Some(end) => start + end,
+                None => {
+                    output.push_str(&template[start..]);
+                    return Ok(output);
+                }
+            };
+
+            let key = template[start + 6..opening_end].trim();
+
+            if Self::is_valid_variable_name(key) && self.get(key).is_none() {
+                return Err(TemplateError::UndefinedVariable(key.to_string()));
+            }
+
+            let body_start = opening_end + 2;
+
+            let (close_start, else_start) = match find_matching_if(template, body_start) {
+                Some(found) => found,
+                None => {
+                    output.push_str(&template[start..]);
+                    return Ok(output);
+                }
+            };
+
+            let close_end = close_start + "{{/if}}".len();
+
+            let selected = if self.is_truthy(key) {
+                let end = else_start.unwrap_or(close_start);
+                &template[body_start..end]
+            } else if let Some(else_pos) = else_start {
+                &template[else_pos + "{{else}}".len()..close_start]
+            } else {
+                ""
+            };
+
+            output.push_str(&self.render_conditions_strict(selected, depth + 1)?);
+            position = close_end;
+        }
+
+        output.push_str(&template[position..]);
+        Ok(output)
+    }
+
     /// Substitui variáveis e escapa os respectivos valores.
     fn render_variables(&self, template: &str) -> String {
         let mut output = String::new();
@@ -104,6 +276,12 @@ impl TemplateContext {
             };
 
             let key = template[value_start..end].trim();
+
+            if !Self::is_valid_variable_name(key) {
+                output.push_str(&template[start..end + 2]);
+                position = end + 2;
+                continue;
+            }
 
             if let Some(value) = self.get(key) {
                 output.push_str(&escape_html(&value_to_string(value)));
@@ -186,6 +364,66 @@ impl TemplateContext {
         output
     }
 
+    fn render_each_strict(&self, template: &str, depth: usize) -> Result<String, TemplateError> {
+        let mut output = String::new();
+        let mut position = 0;
+
+        while let Some(relative_start) = template[position..].find("{{#each ") {
+            let start = position + relative_start;
+            output.push_str(&template[position..start]);
+
+            let opening_end = match template[start..].find("}}") {
+                Some(end) => start + end,
+                None => {
+                    output.push_str(&template[start..]);
+                    return Ok(output);
+                }
+            };
+
+            let key = template[start + 8..opening_end].trim();
+            let body_start = opening_end + 2;
+
+            let (close_start, close_end) = match find_matching_each(template, body_start) {
+                Some(found) => found,
+                None => {
+                    output.push_str(&template[start..]);
+                    return Ok(output);
+                }
+            };
+
+            let body = &template[body_start..close_start];
+
+            match self.get(key) {
+                Some(Value::Array(items)) => {
+                    for item in items {
+                        let mut child = self.clone();
+
+                        if let Value::Object(properties) = item {
+                            for (name, value) in properties {
+                                child.set(name.clone(), value.clone());
+                            }
+                        } else {
+                            child.set("this", item.clone());
+                        }
+
+                        output.push_str(&child.render_strict_with_depth(body, depth + 1)?);
+                    }
+                }
+                Some(_) => {
+                    // O valor existe, mas não é uma coleção.
+                }
+                None => {
+                    return Err(TemplateError::UndefinedVariable(key.to_string()));
+                }
+            }
+
+            position = close_end;
+        }
+
+        output.push_str(&template[position..]);
+        Ok(output)
+    }
+
     /// Compõe uma página usando um layout e partials reutilizáveis.
     pub fn render_with_layout(
         &self,
@@ -208,6 +446,152 @@ impl TemplateContext {
         // 5. Renderizar variáveis, condições e ciclos.
         Ok(self.render(&combined))
     }
+    /// Verifica se o nome de uma variável é válido.
+    fn is_valid_variable_name(key: &str) -> bool {
+        let mut chars = key.chars();
+
+        match chars.next() {
+            Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+            _ => return false,
+        }
+
+        chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
+    /// Compõe uma página com layout e partials em modo estrito.
+
+    pub fn render_with_layout_strict(
+        &self,
+        page_path: &str,
+        layout_path: &str,
+        partials_dir: &str,
+    ) -> Result<String, TemplateError> {
+        let page = std::fs::read_to_string(page_path)?;
+        let layout = std::fs::read_to_string(layout_path)?;
+
+        let combined = layout.replace("{{{conteudo}}}", &page);
+        let expanded = expand_partials(&combined, partials_dir)?;
+
+        self.render_strict(&expanded)
+    }
+}
+
+fn validate_template_syntax(template: &str) -> Result<(), TemplateError> {
+    // Cada bloco guarda o seu tipo e se já encontrou um else.
+    let mut stack: Vec<(&str, bool)> = Vec::new();
+    let mut position = 0;
+
+    while let Some(relative_start) = template[position..].find("{{") {
+        let start = position + relative_start;
+
+        let Some(relative_end) = template[start + 2..].find("}}") else {
+            return Err(TemplateError::Syntax(
+                "Expression without a closing element '}}'.".to_string(),
+            ));
+        };
+
+        let end = start + 2 + relative_end;
+        let expression = template[start + 2..end].trim();
+
+        if expression.is_empty() {
+            return Err(TemplateError::Syntax(
+                "Empty template expression.".to_string(),
+            ));
+        }
+
+        if let Some(condition) = expression.strip_prefix("#if ") {
+            let condition = condition.trim();
+
+            if !TemplateContext::is_valid_variable_name(condition) {
+                return Err(TemplateError::Syntax(
+                    "Invalid variable name in if condition.".to_string(),
+                ));
+            }
+
+            stack.push(("if", false));
+        } else if let Some(collection) = expression.strip_prefix("#each ") {
+            let collection = collection.trim();
+
+            if !TemplateContext::is_valid_variable_name(collection) {
+                return Err(TemplateError::Syntax(
+                    "Invalid collection name in each block.".to_string(),
+                ));
+            }
+
+            stack.push(("each", false));
+        } else if expression == "#if" || expression == "#each" {
+            return Err(TemplateError::Syntax(
+                "Missing variable name in block expression.".to_string(),
+            ));
+        } else if expression == "else" {
+            match stack.last_mut() {
+                Some(("if", has_else)) => {
+                    if *has_else {
+                        return Err(TemplateError::Syntax(
+                            "Duplicate 'else' in the same if block.".to_string(),
+                        ));
+                    }
+
+                    *has_else = true;
+                }
+                Some((block, _)) => {
+                    return Err(TemplateError::Syntax(format!(
+                        "'else' is not allowed inside the '{block}' block."
+                    )));
+                }
+                None => {
+                    return Err(TemplateError::Syntax(
+                        "'else' without an open if block.".to_string(),
+                    ));
+                }
+            }
+        } else if expression.starts_with("else ") || expression.starts_with("else\t") {
+            return Err(TemplateError::Syntax(
+                "Invalid 'else' expression. The 'else' directive must appear alone.".to_string(),
+            ));
+        } else if expression == "/if" {
+            match stack.pop() {
+                Some(("if", _)) => {}
+                Some((other, _)) => {
+                    return Err(TemplateError::Syntax(format!(
+                        "'/if' closing tag incompatible with the block '{other}'."
+                    )));
+                }
+                None => {
+                    return Err(TemplateError::Syntax(
+                        "'/if' closing tag with no open block.".to_string(),
+                    ));
+                }
+            }
+        } else if expression == "/each" {
+            match stack.pop() {
+                Some(("each", _)) => {}
+                Some((other, _)) => {
+                    return Err(TemplateError::Syntax(format!(
+                        "'/each' closing tag is incompatible with the block '{other}'."
+                    )));
+                }
+                None => {
+                    return Err(TemplateError::Syntax(
+                        "Closing '/each' without an open block.".to_string(),
+                    ));
+                }
+            }
+        } else if expression.starts_with('#') || expression.starts_with('/') {
+            return Err(TemplateError::Syntax(format!(
+                "Unsupported template block expression: '{expression}'."
+            )));
+        }
+
+        position = end + 2;
+    }
+
+    if let Some((block, _)) = stack.last() {
+        return Err(TemplateError::Syntax(format!(
+            "Block '{block}' without a closing tag."
+        )));
+    }
+
+    Ok(())
 }
 
 /// Encontra o fecho de um bloco if, respeitando blocos aninhados.
@@ -295,51 +679,81 @@ fn escape_html(value: &str) -> String {
 
 /// Substitui {{> nome}} pelo conteúdo de views/partials/nome.html.
 fn expand_partials(template: &str, partials_dir: &str) -> std::io::Result<String> {
-    let mut result = template.to_string();
+    fn expand(
+        template: &str,
+        partials_dir: &std::path::Path,
+        stack: &mut Vec<String>,
+        depth: usize,
+    ) -> std::io::Result<String> {
+        const MAX_DEPTH: usize = 20;
 
-    // Limita a recursividade para evitar inclusões infinitas.
-    for _ in 0..20 {
-        let Some(start) = result.find("{{>") else {
-            return Ok(result);
-        };
-
-        let Some(relative_end) = result[start + 3..].find("}}") else {
-            return Ok(result);
-        };
-
-        let end = start + 3 + relative_end;
-        let name = result[start + 3..end].trim();
-
-        // Aceitar apenas nomes simples de partials.
-        if name.is_empty()
-            || !name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-        {
+        if depth > MAX_DEPTH {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Nome de partial inválido",
+                std::io::ErrorKind::InvalidData,
+                "Profundidade máxima de inclusões de partials excedida",
             ));
         }
 
-        let path = std::path::Path::new(partials_dir).join(format!("{name}.html"));
+        let mut result = String::with_capacity(template.len());
+        let mut position = 0;
 
-        let partial = std::fs::read_to_string(path)?;
+        while let Some(relative_start) = template[position..].find("{{>") {
+            let start = position + relative_start;
+            result.push_str(&template[position..start]);
 
-        // Expandir também os partials incluídos noutros partials.
-        let partial = expand_partials(&partial, partials_dir)?;
+            let Some(relative_end) = template[start + 3..].find("}}") else {
+                result.push_str(&template[start..]);
+                return Ok(result);
+            };
 
-        result.replace_range(start..end + 2, &partial);
+            let end = start + 3 + relative_end;
+            let name = template[start + 3..end].trim();
+
+            if name.is_empty()
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Nome de partial inválido",
+                ));
+            }
+
+            if stack.iter().any(|item| item == name) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Inclusão circular de partial detectada: {name}"),
+                ));
+            }
+
+            let path = partials_dir.join(format!("{name}.html"));
+            let canonical_path = std::fs::canonicalize(&path)?;
+
+            if !canonical_path.starts_with(partials_dir) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "O partial tenta aceder a um ficheiro fora do diretório autorizado",
+                ));
+            }
+
+            let partial = std::fs::read_to_string(canonical_path)?;
+
+            stack.push(name.to_string());
+            let expanded = expand(&partial, partials_dir, stack, depth + 1);
+            stack.pop();
+
+            result.push_str(&expanded?);
+            position = end + 2;
+        }
+
+        result.push_str(&template[position..]);
+        Ok(result)
     }
 
-    if result.contains("{{>") {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Limite de inclusões de partials excedido",
-        ));
-    }
+    let canonical_partials_dir = std::fs::canonicalize(partials_dir)?;
 
-    Ok(result)
+    expand(template, &canonical_partials_dir, &mut Vec::new(), 0)
 }
 
 #[cfg(test)]
@@ -394,5 +808,592 @@ mod tests {
         let result = context.render("{{#each produtos}}<p>{{nome}}</p>{{/each}}");
 
         assert_eq!(result, "<p>Teclado</p><p>&lt;script&gt;</p>");
+    }
+
+    #[test]
+    fn rejects_invalid_partial_names() {
+        let result = expand_partials("{{> ../secret}}", "views/partials");
+
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn rejects_circular_partials() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let dir = std::env::temp_dir().join(format!("rustpress-partials-{unique}"));
+
+        fs::create_dir_all(&dir).unwrap();
+
+        fs::write(dir.join("a.html"), "{{> b}}").unwrap();
+        fs::write(dir.join("b.html"), "{{> a}}").unwrap();
+
+        let result = expand_partials("{{> a}}", dir.to_str().unwrap());
+
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn expands_nested_partials() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let dir = std::env::temp_dir().join(format!("rustpress-nested-{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+
+        fs::write(dir.join("cabecalho.html"), "<header>Olá</header>").unwrap();
+        fs::write(
+            dir.join("pagina.html"),
+            "{{> cabecalho}}<main>Conteúdo</main>",
+        )
+        .unwrap();
+
+        let result = expand_partials("{{> pagina}}", dir.to_str().unwrap());
+
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(result.unwrap(), "<header>Olá</header><main>Conteúdo</main>");
+    }
+
+    #[test]
+    fn rejects_partials_exceeding_max_depth() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let dir = std::env::temp_dir().join(format!("rustpress-depth-{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+
+        for index in 0..22 {
+            let content = if index == 21 {
+                "Fim".to_string()
+            } else {
+                format!("{{{{> partial_{}}}}}", index + 1)
+            };
+
+            fs::write(dir.join(format!("partial_{index}.html")), content).unwrap();
+        }
+
+        let result = expand_partials("{{> partial_0}}", dir.to_str().unwrap());
+
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn rejects_partial_symlink_outside_directory() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let base = std::env::temp_dir().join(format!("rustpress-symlink-{unique}"));
+        let partials = base.join("partials");
+        let outside = base.join("outside.html");
+
+        fs::create_dir_all(&partials).unwrap();
+        fs::write(&outside, "Conteúdo externo").unwrap();
+
+        let link = partials.join("externo.html");
+
+        #[cfg(windows)]
+        {
+            if let Err(error) = std::os::windows::fs::symlink_file(&outside, &link) {
+                fs::remove_dir_all(&base).unwrap();
+
+                eprintln!("Teste ignorado: o Windows não permitiu criar o symlink: {error}");
+
+                return;
+            }
+        }
+        std::os::windows::fs::symlink_file(&outside, &link).expect(
+            "Não foi possível criar a ligação simbólica; execute o teste com permissões adequadas",
+        );
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        let result = expand_partials("{{> externo}}", partials.to_str().unwrap());
+
+        fs::remove_dir_all(&base).unwrap();
+
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+    }
+
+    #[test]
+    fn strict_render_rejects_excessive_nested_if_depth() {
+        let mut context = TemplateContext::new();
+
+        context.set("ativo", serde_json::json!(true));
+
+        let mut template = String::new();
+
+        for _ in 0..25 {
+            template.push_str("{{#if ativo}}");
+        }
+
+        template.push_str("Conteúdo");
+
+        for _ in 0..25 {
+            template.push_str("{{/if}}");
+        }
+
+        let result = context.render_strict(&template);
+
+        assert!(matches!(result, Err(TemplateError::NestingLimitExceeded)));
+    }
+
+    #[test]
+    fn strict_render_rejects_excessive_nested_each_depth() {
+        let mut context = TemplateContext::new();
+
+        let mut template = String::new();
+
+        for index in 0..25 {
+            let name = format!("items{index}");
+            context.set(name, serde_json::json!([1]));
+
+            template.push_str(&format!("{{{{#each items{index}}}}}"));
+        }
+
+        template.push_str("Conteúdo");
+
+        for _ in 0..25 {
+            template.push_str("{{/each}}");
+        }
+
+        let result = context.render_strict(&template);
+
+        assert!(matches!(result, Err(TemplateError::NestingLimitExceeded)));
+    }
+
+    #[test]
+    fn accepts_valid_variable_names() {
+        assert!(TemplateContext::is_valid_variable_name("nome"));
+        assert!(TemplateContext::is_valid_variable_name("_nome"));
+        assert!(TemplateContext::is_valid_variable_name("usuario123"));
+        assert!(TemplateContext::is_valid_variable_name("nome_completo"));
+    }
+
+    #[test]
+    fn rejects_invalid_variable_names() {
+        assert!(!TemplateContext::is_valid_variable_name(""));
+        assert!(!TemplateContext::is_valid_variable_name("user.name"));
+        assert!(!TemplateContext::is_valid_variable_name("../secret"));
+        assert!(!TemplateContext::is_valid_variable_name("nome-completo"));
+        assert!(!TemplateContext::is_valid_variable_name("123nome"));
+    }
+
+    #[test]
+    fn preserves_unknown_variables_for_debugging() {
+        let context = TemplateContext::new();
+        let result = context.render_variables("Olá, {{usuario}}!");
+
+        assert_eq!(result, "Olá, {{usuario}}!");
+    }
+
+    #[test]
+    fn strict_render_rejects_unknown_variables() {
+        let context = TemplateContext::new();
+
+        let result = context.render_strict("Olá, {{usuario}}!");
+
+        assert!(matches!(
+            result,
+            Err(TemplateError::UndefinedVariable(name)) if name == "usuario"
+        ));
+    }
+
+    #[test]
+    fn strict_render_escapes_html() {
+        let mut context = TemplateContext::new();
+        context.set(
+            "nome",
+            Value::String("<script>alert(1)</script>".to_string()),
+        );
+
+        let result = context.render_strict("{{nome}}").unwrap();
+
+        assert_eq!(result, "&lt;script&gt;alert(1)&lt;/script&gt;");
+    }
+
+    #[test]
+    fn normal_render_preserves_unknown_variables() {
+        let context = TemplateContext::new();
+
+        assert_eq!(context.render("Olá, {{usuario}}!"), "Olá, {{usuario}}!");
+    }
+    #[test]
+    fn strict_layout_render_rejects_unknown_variables() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let base = std::env::temp_dir().join(format!("rustpress-strict-layout-{unique}"));
+        let partials = base.join("partials");
+
+        fs::create_dir_all(&partials).unwrap();
+
+        let page = base.join("pagina.html");
+        let layout = base.join("layout.html");
+
+        fs::write(&page, "<h1>{{usuario}}</h1>").unwrap();
+        fs::write(&layout, "<html><body>{{{conteudo}}}</body></html>").unwrap();
+
+        let context = TemplateContext::new();
+
+        let result = context.render_with_layout_strict(
+            page.to_str().unwrap(),
+            layout.to_str().unwrap(),
+            partials.to_str().unwrap(),
+        );
+
+        assert!(matches!(
+            result,
+            Err(TemplateError::UndefinedVariable(name)) if name == "usuario"
+        ));
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn strict_layout_render_returns_io_error_for_missing_page() {
+        let context = TemplateContext::new();
+
+        let result = context.render_with_layout_strict(
+            "rustpress-page-that-does-not-exist-83721.html",
+            "layout.html",
+            "partials",
+        );
+
+        assert!(matches!(result, Err(TemplateError::Io(_))));
+    }
+
+    #[test]
+    fn strict_render_rejects_unknown_variable_inside_each() {
+        use serde_json::json;
+
+        let mut context = TemplateContext::new();
+
+        context.set(
+            "produtos",
+            json!([
+                {"nome": "Teclado"}
+            ]),
+        );
+
+        let template = "{{#each produtos}}<p>{{nome}} - {{preco}}</p>{{/each}}";
+
+        let result = context.render_strict(template);
+
+        assert!(matches!(
+            result,
+            Err(TemplateError::UndefinedVariable(name))
+                if name == "preco"
+        ));
+    }
+
+    #[test]
+    fn strict_layout_render_rejects_unknown_variable_in_partial() {
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let base = std::env::temp_dir().join(format!("rustpress-strict-partial-{unique}"));
+
+        let partials = base.join("partials");
+        fs::create_dir_all(&partials).unwrap();
+
+        let page = base.join("pagina.html");
+        let layout = base.join("layout.html");
+        let partial = partials.join("cabecalho.html");
+
+        fs::write(&page, "<main>Conteúdo</main>").unwrap();
+        fs::write(&layout, "<html>{{> cabecalho}}{{{conteudo}}}</html>").unwrap();
+        fs::write(&partial, "<h1>{{titulo_inexistente}}</h1>").unwrap();
+
+        let context = TemplateContext::new();
+
+        let result = context.render_with_layout_strict(
+            page.to_str().unwrap(),
+            layout.to_str().unwrap(),
+            partials.to_str().unwrap(),
+        );
+
+        assert!(matches!(
+            result,
+            Err(TemplateError::UndefinedVariable(name))
+                if name == "titulo_inexistente"
+        ));
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn strict_render_rejects_unknown_variable_in_if_condition() {
+        let context = TemplateContext::new();
+
+        let result =
+            context.render_strict("{{#if utilizador_inexistente}}Olá{{else}}Visitante{{/if}}");
+
+        assert!(matches!(
+            result,
+            Err(TemplateError::UndefinedVariable(name))
+                if name == "utilizador_inexistente"
+        ));
+    }
+
+    #[test]
+    fn strict_render_rejects_unknown_variable_in_nested_if() {
+        let mut context = TemplateContext::new();
+        context.set("autenticado", serde_json::Value::Bool(true));
+
+        let result = context.render_strict(
+            "{{#if autenticado}}\
+            {{#if permissao_inexistente}}\
+                Acesso permitido\
+            {{/if}}\
+        {{/if}}",
+        );
+
+        assert!(matches!(
+            result,
+            Err(TemplateError::UndefinedVariable(name))
+                if name == "permissao_inexistente"
+        ));
+    }
+
+    #[test]
+    fn template_validation_rejects_unclosed_if() {
+        let result = TemplateContext::validate_template("{{#if utilizador}}Olá");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn template_validation_rejects_unclosed_each() {
+        let result = TemplateContext::validate_template("{{#each produtos}}<p>{{nome}}</p>");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validation_rejects_unclosed_if() {
+        let result = TemplateContext::validate_template("{{#if utilizador}}Olá");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
+    fn validation_rejects_unclosed_each() {
+        let result = TemplateContext::validate_template("{{#each produtos}}<p>{{nome}}</p>");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
+    fn validation_rejects_mismatched_closing_block() {
+        let result = TemplateContext::validate_template("{{#if utilizador}}Olá{{/each}}");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
+    fn validation_accepts_nested_blocks() {
+        let result = TemplateContext::validate_template(
+            "{{#if autenticado}}{{#each produtos}}{{nome}}{{/each}}{{/if}}",
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn strict_layout_render_rejects_invalid_syntax_in_partial() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let base = std::env::temp_dir().join(format!("rustpress-invalid-partial-syntax-{unique}"));
+        let partials = base.join("partials");
+
+        fs::create_dir_all(&partials).unwrap();
+
+        let page = base.join("pagina.html");
+        let layout = base.join("layout.html");
+        let partial = partials.join("cabecalho.html");
+
+        fs::write(&page, "<main>Conteúdo</main>").unwrap();
+        fs::write(
+            &layout,
+            "<html><body>{{> cabecalho}} {{{conteudo}}}</body></html>",
+        )
+        .unwrap();
+
+        // O partial contém um bloco if sem fecho.
+        fs::write(&partial, "{{#if titulo}}<h1>Olá</h1>").unwrap();
+
+        let context = TemplateContext::new();
+
+        let result = context.render_with_layout_strict(
+            page.to_str().unwrap(),
+            layout.to_str().unwrap(),
+            partials.to_str().unwrap(),
+        );
+
+        assert!(
+            matches!(result, Err(TemplateError::Syntax(_))),
+            "Esperava um erro de sintaxe, mas recebeu: {result:?}"
+        );
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn validation_rejects_duplicate_else() {
+        let template = "{{#if autenticado}}Bem-vindo{{else}}Negado{{else}}Inválido{{/if}}";
+
+        let result = TemplateContext::validate_template(template);
+
+        assert!(
+            matches!(result, Err(TemplateError::Syntax(_))),
+            "Esperava um erro de sintaxe para um else duplicado."
+        );
+    }
+
+    #[test]
+    fn validation_rejects_else_inside_each() {
+        let template = "{{#each alunos}}Nome: {{this}}{{else}}Sem alunos{{/each}}";
+
+        let result = TemplateContext::validate_template(template);
+
+        assert!(
+            matches!(result, Err(TemplateError::Syntax(_))),
+            "Esperava um erro de sintaxe para else dentro de each."
+        );
+    }
+
+    #[test]
+    fn validation_rejects_if_without_condition() {
+        let template = "{{#if}}Bem-vindo{{/if}}";
+
+        let result = TemplateContext::validate_template(template);
+
+        assert!(
+            matches!(result, Err(TemplateError::Syntax(_))),
+            "Esperava um erro de sintaxe para if sem condição."
+        );
+    }
+
+    #[test]
+    fn validation_rejects_each_without_collection() {
+        let template = "{{#each}}<p>{{this}}</p>{{/each}}";
+
+        let result = TemplateContext::validate_template(template);
+
+        assert!(
+            matches!(result, Err(TemplateError::Syntax(_))),
+            "Esperava um erro de sintaxe para each sem coleção."
+        );
+    }
+
+    #[test]
+    fn validation_rejects_invalid_each_collection_name() {
+        let template = "{{#each alunos-lista}}<p>{{this}}</p>{{/each}}";
+
+        let result = TemplateContext::validate_template(template);
+
+        assert!(
+            matches!(result, Err(TemplateError::Syntax(_))),
+            "Esperava um erro de sintaxe para nome de coleção inválido."
+        );
+    }
+
+    #[test]
+    fn validation_rejects_invalid_if_condition_name() {
+        let template = "{{#if utilizador-ativo}}Bem-vindo{{/if}}";
+
+        let result = TemplateContext::validate_template(template);
+
+        assert!(
+            matches!(result, Err(TemplateError::Syntax(_))),
+            "Esperava um erro de sintaxe para nome de condição inválido."
+        );
+    }
+
+    #[test]
+    fn validation_rejects_expression_without_closing_delimiter() {
+        let template = "Olá, {{utilizador";
+
+        let result = TemplateContext::validate_template(template);
+
+        assert!(
+            matches!(result, Err(TemplateError::Syntax(_))),
+            "Esperava um erro de sintaxe para uma expressão sem delimitador de fecho."
+        );
+    }
+
+    #[test]
+    fn validation_rejects_empty_expression() {
+        let template = "Olá, {{}}";
+
+        let result = TemplateContext::validate_template(template);
+
+        assert!(
+            matches!(result, Err(TemplateError::Syntax(_))),
+            "Esperava um erro de sintaxe para uma expressão vazia."
+        );
+    }
+
+    #[test]
+    fn validation_rejects_unsupported_block_expression() {
+        let result = TemplateContext::validate_template("{{#unless ativo}}Olá{{/unless}}");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
+    fn validation_rejects_malformed_else_expression() {
+        let result =
+            TemplateContext::validate_template("{{#if ativo}}Olá{{else nome}}Mundo{{/if}}");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
     }
 }

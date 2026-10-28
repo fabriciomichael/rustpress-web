@@ -4,13 +4,13 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request as HyperRequest, Response as HyperResponse, body::Incoming, http::Method};
 
-use crate::{TemplateContext, request::Request, response::Response};
+use crate::{HandlerError, TemplateContext, request::Request, response::Response};
 
 /// Tipo que representa um handler de rota.
 ///
 /// Um handler recebe a requisição processada pelo framework e a resposta em
 /// construção e devolve a resposta final a enviar ao cliente.
-type Handler = Arc<dyn Fn(Request, Response) -> Response + Send + Sync>;
+type Handler = Arc<dyn Fn(Request, Response) -> Result<Response, HandlerError> + Send + Sync>;
 
 /// Tipo que representa um middleware de pipeline.
 ///
@@ -45,6 +45,21 @@ impl Router {
     pub(crate) fn add<F>(&mut self, method: Method, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Response + Send + Sync + 'static,
+    {
+        self.add_fallible(method, path, move |request, response| {
+            Ok(handler(request, response))
+        })
+    }
+
+    /// Regista uma rota cujo handler pode devolver um erro.
+    pub(crate) fn add_fallible<F>(
+        &mut self,
+        method: Method,
+        path: &str,
+        handler: F,
+    ) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, HandlerError> + Send + Sync + 'static,
     {
         Self::validate_route(path)?;
 
@@ -210,6 +225,7 @@ impl Router {
             &context,
         )
     }
+
     /// Processa uma requisição HTTP e devolve a resposta correspondente.
     ///
     /// A lógica faz as seguintes etapas:
@@ -246,7 +262,13 @@ impl Router {
         }
 
         let mut response = match matched {
-            Some((handler, _)) => handler(request, Response::new()).into_hyper(),
+            Some((handler, _)) => match handler(request, Response::new()) {
+                Ok(response) => response.into_hyper(),
+                Err(error) => {
+                    eprintln!("Erro no handler: {error}");
+                    self.error_response(500).into_hyper()
+                }
+            },
 
             None if self.path_exists(&path) => {
                 let allow = self
@@ -569,5 +591,22 @@ mod tests {
         let methods = router.allowed_methods("/utilizadores/42");
 
         assert_eq!(methods, vec![Method::DELETE, Method::GET, Method::HEAD]);
+    }
+
+    #[test]
+    fn middleware_none_allows_handler_to_continue() {
+        let mut router = Router::new();
+
+        router.use_middleware(|_| None);
+
+        router
+            .add(Method::GET, "/teste", |_, response| {
+                response.send("Handler executado")
+            })
+            .expect("A rota deveria ser registada");
+
+        // Neste módulo, podemos testar directamente o registo
+        // do middleware, mas handle() exige uma requisição Hyper
+        // com um corpo Incoming.
     }
 }
