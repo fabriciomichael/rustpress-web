@@ -11,6 +11,7 @@ use crate::{HandlerError, TemplateContext, request::Request, response::Response}
 /// Um handler recebe a requisição processada pelo framework e a resposta em
 /// construção e devolve a resposta final a enviar ao cliente.
 type Handler = Arc<dyn Fn(Request, Response) -> Result<Response, HandlerError> + Send + Sync>;
+type MatchedRoute = (String, Handler, Vec<(String, String)>);
 
 /// Tipo que representa o handler global de erros.
 type ErrorHandler = Arc<dyn Fn(&HandlerError, &crate::RequestContext) -> Response + Send + Sync>;
@@ -45,7 +46,6 @@ impl Router {
     ///
     /// O path pode conter segmentos dinâmicos com o prefixo `:`, por exemplo
     /// `/utilizadores/:id`.
-
     pub(crate) fn add<F>(&mut self, method: Method, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Response + Send + Sync + 'static,
@@ -85,7 +85,6 @@ impl Router {
     ///
     /// Quando encontra um marcador `:nome`, extrai o valor correspondente e
     /// devolve uma lista de pares `(nome, valor)` para uso em `Request::param`.
-
     fn match_path(route: &str, path: &str) -> Option<Vec<(String, String)>> {
         // Rejeita segmentos vazios no interior dos caminhos.
         if route.contains("//") || path.contains("//") {
@@ -128,7 +127,6 @@ impl Router {
 
     /// Define a prioridade de uma rota.
     /// Segmentos estáticos têm prioridade sobre segmentos dinâmicos.
-
     fn route_specificity(route: &str) -> Vec<u8> {
         route
             .trim_matches('/')
@@ -168,11 +166,7 @@ impl Router {
         methods
     }
 
-    fn find_route(
-        &self,
-        method: &Method,
-        path: &str,
-    ) -> Option<(String, Handler, Vec<(String, String)>)> {
+    fn find_route(&self, method: &Method, path: &str) -> Option<MatchedRoute> {
         // Primeiro, procura uma correspondência exacta do método.
         let exact_match = self
             .routes

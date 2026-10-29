@@ -145,7 +145,6 @@ impl Response {
 
     /// Converte a resposta interna para o tipo da biblioteca Hyper antes da
     /// entrega ao cliente.
-
     pub(crate) fn into_hyper(self) -> HyperResponse<Full<Bytes>> {
         let body_length = self.content_length.unwrap_or(self.body.len() as u64);
 

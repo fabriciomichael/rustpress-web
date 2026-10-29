@@ -144,10 +144,8 @@ impl App {
             // Converte o pedido para um caminho relativo à pasta pública.
             let relative = if path == prefix {
                 ""
-            } else if let Some(rest) = path.strip_prefix(&format!("{prefix}/")) {
-                rest
             } else {
-                return None;
+                path.strip_prefix(&format!("{prefix}/"))?
             };
 
             let relative = if relative.is_empty() {

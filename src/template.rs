@@ -1,6 +1,8 @@
 use serde_json::{Map, Value};
 use std::fmt;
 
+const MAX_TEMPLATE_DEPTH: usize = 20;
+
 #[derive(Debug)]
 pub enum TemplateError {
     UndefinedVariable(String),
@@ -79,30 +81,74 @@ impl TemplateContext {
 
     /// Renderiza variáveis e condições de um template.
     pub fn render(&self, template: &str) -> String {
-        let result = self.render_each(template);
-        let result = self.render_conditions(&result);
-        self.render_variables(&result)
+        let mut protected_values = Vec::new();
+        let prefix = "\u{E000}RUSTPRESS_NORMAL_PROTECTED_";
+
+        // Evita conflitos com marcadores que já existam no template.
+        let mut unique_prefix = prefix.to_string();
+        while template.contains(&unique_prefix) {
+            unique_prefix.push('_');
+        }
+
+        let rendered =
+            self.render_with_protection(template, 0, &unique_prefix, &mut protected_values);
+
+        restore_protected_values(&rendered, &unique_prefix, &protected_values)
     }
 
+    fn render_with_protection(
+        &self,
+        template: &str,
+        depth: usize,
+        protected_prefix: &str,
+        protected_values: &mut Vec<String>,
+    ) -> String {
+        if depth > MAX_TEMPLATE_DEPTH {
+            return template.to_string();
+        }
+
+        let result =
+            self.render_each_with_protection(template, depth, protected_prefix, protected_values);
+
+        let result = self.render_conditions_with_protection(&result, depth);
+
+        self.render_variables_with_protection(&result, protected_prefix, protected_values)
+    }
     /// Renderiza um template e devolve erro se uma variável não existir.
     pub fn render_strict(&self, template: &str) -> Result<String, TemplateError> {
-        self.render_strict_with_depth(template, 0)
+        let mut prefix = "\u{E000}RUSTPRESS_PROTECTED_".to_string();
+
+        while template.contains(&prefix) {
+            prefix.push('_');
+        }
+
+        let mut protected_values = Vec::new();
+
+        let rendered =
+            self.render_strict_with_depth(template, 0, &prefix, &mut protected_values)?;
+
+        Ok(restore_protected_values(
+            &rendered,
+            &prefix,
+            &protected_values,
+        ))
     }
 
     fn render_strict_with_depth(
         &self,
         template: &str,
         depth: usize,
+        protected_prefix: &str,
+        protected_values: &mut Vec<String>,
     ) -> Result<String, TemplateError> {
-        const MAX_DEPTH: usize = 20;
-
-        if depth > MAX_DEPTH {
+        if depth > MAX_TEMPLATE_DEPTH {
             return Err(TemplateError::NestingLimitExceeded);
         }
 
         Self::validate_template(template)?;
 
-        let result = self.render_each_strict(template, depth)?;
+        let result =
+            self.render_each_strict(template, depth, protected_prefix, protected_values)?;
         let result = self.render_conditions_strict(&result, depth)?;
 
         let mut output = String::new();
@@ -130,7 +176,11 @@ impl TemplateContext {
 
             match self.get(key) {
                 Some(value) => {
-                    output.push_str(&escape_html(&value_to_string(value)));
+                    let index = protected_values.len();
+
+                    protected_values.push(escape_html(&value_to_string(value)));
+
+                    output.push_str(&format!("{protected_prefix}{index}\u{E001}"));
                 }
                 None => {
                     return Err(TemplateError::UndefinedVariable(key.to_string()));
@@ -144,14 +194,16 @@ impl TemplateContext {
         Ok(output)
     }
 
-    /// Interpreta blocos if, else e /if, incluindo condições aninhadas.
-    fn render_conditions(&self, template: &str) -> String {
+    fn render_conditions_with_protection(&self, template: &str, depth: usize) -> String {
+        if depth > MAX_TEMPLATE_DEPTH {
+            return template.to_string();
+        }
+
         let mut output = String::new();
         let mut position = 0;
 
         while let Some(relative_start) = template[position..].find("{{#if ") {
             let start = position + relative_start;
-
             output.push_str(&template[position..start]);
 
             let opening_end = match template[start..].find("}}") {
@@ -184,7 +236,8 @@ impl TemplateContext {
                 ""
             };
 
-            output.push_str(&self.render_conditions(selected));
+            output.push_str(&self.render_conditions_with_protection(selected, depth + 1));
+
             position = close_end;
         }
 
@@ -198,9 +251,7 @@ impl TemplateContext {
         template: &str,
         depth: usize,
     ) -> Result<String, TemplateError> {
-        const MAX_DEPTH: usize = 20;
-
-        if depth > MAX_DEPTH {
+        if depth > MAX_TEMPLATE_DEPTH {
             return Err(TemplateError::NestingLimitExceeded);
         }
 
@@ -255,14 +306,17 @@ impl TemplateContext {
         Ok(output)
     }
 
-    /// Substitui variáveis e escapa os respectivos valores.
-    fn render_variables(&self, template: &str) -> String {
+    fn render_variables_with_protection(
+        &self,
+        template: &str,
+        protected_prefix: &str,
+        protected_values: &mut Vec<String>,
+    ) -> String {
         let mut output = String::new();
         let mut position = 0;
 
         while let Some(relative_start) = template[position..].find("{{") {
             let start = position + relative_start;
-
             output.push_str(&template[position..start]);
 
             let value_start = start + 2;
@@ -284,10 +338,12 @@ impl TemplateContext {
             }
 
             if let Some(value) = self.get(key) {
-                output.push_str(&escape_html(&value_to_string(value)));
+                let index = protected_values.len();
+                protected_values.push(escape_html(&value_to_string(value)));
+
+                output.push_str(&format!("{protected_prefix}{index}\u{E001}"));
             } else {
-                // Mantém expressões desconhecidas para facilitar
-                // a identificação de erros no template.
+                // Mantém expressões desconhecidas, tal como no modo normal.
                 output.push_str(&template[start..end + 2]);
             }
 
@@ -310,7 +366,17 @@ impl TemplateContext {
         }
     }
 
-    fn render_each(&self, template: &str) -> String {
+    fn render_each_with_protection(
+        &self,
+        template: &str,
+        depth: usize,
+        protected_prefix: &str,
+        protected_values: &mut Vec<String>,
+    ) -> String {
+        if depth > MAX_TEMPLATE_DEPTH {
+            return template.to_string();
+        }
+
         let mut output = String::new();
         let mut position = 0;
 
@@ -343,8 +409,6 @@ impl TemplateContext {
                 for item in items {
                     let mut child = self.clone();
 
-                    // As propriedades do item ficam disponíveis
-                    // directamente no template: {{nome}}, {{preco}}.
                     if let Value::Object(properties) = item {
                         for (name, value) in properties {
                             child.set(name.clone(), value.clone());
@@ -353,7 +417,12 @@ impl TemplateContext {
                         child.set("this", item.clone());
                     }
 
-                    output.push_str(&child.render(body));
+                    output.push_str(&child.render_with_protection(
+                        body,
+                        depth + 1,
+                        protected_prefix,
+                        protected_values,
+                    ));
                 }
             }
 
@@ -364,7 +433,13 @@ impl TemplateContext {
         output
     }
 
-    fn render_each_strict(&self, template: &str, depth: usize) -> Result<String, TemplateError> {
+    fn render_each_strict(
+        &self,
+        template: &str,
+        depth: usize,
+        protected_prefix: &str,
+        protected_values: &mut Vec<String>,
+    ) -> Result<String, TemplateError> {
         let mut output = String::new();
         let mut position = 0;
 
@@ -406,7 +481,12 @@ impl TemplateContext {
                             child.set("this", item.clone());
                         }
 
-                        output.push_str(&child.render_strict_with_depth(body, depth + 1)?);
+                        output.push_str(&child.render_strict_with_depth(
+                            body,
+                            depth + 1,
+                            protected_prefix,
+                            protected_values,
+                        )?);
                     }
                 }
                 Some(_) => {
@@ -460,8 +540,8 @@ impl TemplateContext {
 
         chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
     }
-    /// Compõe uma página com layout e partials em modo estrito.
 
+    /// Compõe uma página com layout e partials em modo estrito.
     pub fn render_with_layout_strict(
         &self,
         page_path: &str,
@@ -507,6 +587,9 @@ fn validate_template_syntax(template: &str) -> Result<(), TemplateError> {
             }
 
             stack.push(("if", false));
+            if stack.len() > MAX_TEMPLATE_DEPTH {
+                return Err(TemplateError::NestingLimitExceeded);
+            }
         } else if let Some(collection) = expression.strip_prefix("#each ") {
             let collection = collection.trim();
 
@@ -517,6 +600,9 @@ fn validate_template_syntax(template: &str) -> Result<(), TemplateError> {
             }
 
             stack.push(("each", false));
+            if stack.len() > MAX_TEMPLATE_DEPTH {
+                return Err(TemplateError::NestingLimitExceeded);
+            }
         } else if expression == "#if" || expression == "#each" {
             return Err(TemplateError::Syntax(
                 "Missing variable name in block expression.".to_string(),
@@ -759,8 +845,46 @@ fn expand_partials(template: &str, partials_dir: &str) -> std::io::Result<String
     expand(template, &canonical_partials_dir, &mut Vec::new(), 0)
 }
 
+fn restore_protected_values(template: &str, prefix: &str, values: &[String]) -> String {
+    let mut output = String::new();
+    let mut position = 0;
+
+    while let Some(relative_start) = template[position..].find(prefix) {
+        let start = position + relative_start;
+
+        output.push_str(&template[position..start]);
+
+        let index_start = start + prefix.len();
+
+        let Some(relative_end) = template[index_start..].find('\u{E001}') else {
+            output.push_str(&template[start..]);
+            return output;
+        };
+
+        let index_end = index_start + relative_end;
+        let marker_end = index_end + '\u{E001}'.len_utf8();
+
+        let index = template[index_start..index_end].parse::<usize>();
+
+        if let Ok(index) = index
+            && let Some(value) = values.get(index)
+        {
+            output.push_str(value);
+            position = marker_end;
+            continue;
+        }
+
+        output.push_str(&template[start..marker_end]);
+        position = marker_end;
+    }
+
+    output.push_str(&template[position..]);
+    output
+}
+
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use serde_json::json;
 
@@ -775,6 +899,66 @@ mod tests {
             result,
             "Olá, &lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;"
         );
+    }
+
+    #[test]
+    fn escapes_html_entities_without_double_escaping() {
+        let mut context = TemplateContext::new();
+        context.set("texto", json!("A & B < C"));
+        context.set("entidades", json!("&lt;script&gt;"));
+
+        let result = context.render("{{texto}} | {{entidades}}");
+
+        assert_eq!(result, "A &amp; B &lt; C | &amp;lt;script&amp;gt;");
+    }
+
+    #[test]
+    fn escapes_all_special_html_characters() {
+        let mut context = TemplateContext::new();
+        context.set("texto", json!("& < > \" '"));
+
+        let result = context.render("{{texto}}");
+
+        assert_eq!(result, "&amp; &lt; &gt; &quot; &#x27;");
+    }
+
+    #[test]
+    fn normal_render_limits_nested_if_depth() {
+        let mut context = TemplateContext::new();
+        context.set("ativo", serde_json::json!(true));
+
+        let mut template = String::new();
+
+        for _ in 0..25 {
+            template.push_str("{{#if ativo}}");
+        }
+
+        template.push_str("Conteúdo");
+
+        for _ in 0..25 {
+            template.push_str("{{/if}}");
+        }
+
+        let result = context.render(&template);
+
+        assert!(result.contains("{{#if ativo}}"));
+        assert!(result.contains("Conteúdo"));
+        assert!(result.contains("{{/if}}"));
+    }
+
+    #[test]
+    fn normal_render_does_not_reinterpret_values_inside_each() {
+        let mut context = TemplateContext::new();
+
+        context.set(
+            "mensagens",
+            vec!["{{segredo}}", "<script>alert(1)</script>"].into(),
+        );
+        context.set("segredo", "VALOR_PRIVADO".into());
+
+        let result = context.render("{{#each mensagens}}{{this}}|{{/each}}");
+
+        assert_eq!(result, "{{segredo}}|&lt;script&gt;alert(1)&lt;/script&gt;|");
     }
 
     #[test]
@@ -795,6 +979,54 @@ mod tests {
         let result = context.render("{{#if autenticado}}Bem-vindo{{else}}Inicia sessão{{/if}}");
 
         assert_eq!(result, "Inicia sessão");
+    }
+
+    #[test]
+    fn renders_else_when_if_variable_is_missing() {
+        let context = TemplateContext::new();
+
+        let result = context.render(
+            "{{#if utilizador_inexistente}}Bem-vindo{{else}}Visitante{{/if}}"
+        );
+
+        assert_eq!(result, "Visitante");
+    }
+
+    #[test]
+    fn evaluates_truthiness_for_different_value_types() {
+        let mut context = TemplateContext::new();
+
+        context.set("nulo", json!(null));
+        context.set("zero", json!(0));
+        context.set("texto_zero", json!("0"));
+        context.set("texto_vazio", json!(""));
+        context.set("texto", json!("Olá"));
+        context.set("lista_vazia", json!([]));
+        context.set("lista", json!([1]));
+        context.set("objeto_vazio", json!({}));
+        context.set("objeto", json!({"nome": "Ana"}));
+
+        assert_eq!(context.render("{{#if nulo}}SIM{{else}}NÃO{{/if}}"), "NÃO");
+        assert_eq!(context.render("{{#if zero}}SIM{{else}}NÃO{{/if}}"), "NÃO");
+        assert_eq!(
+            context.render("{{#if texto_zero}}SIM{{else}}NÃO{{/if}}"),
+            "SIM"
+        );
+        assert_eq!(
+            context.render("{{#if texto_vazio}}SIM{{else}}NÃO{{/if}}"),
+            "NÃO"
+        );
+        assert_eq!(context.render("{{#if texto}}SIM{{else}}NÃO{{/if}}"), "SIM");
+        assert_eq!(
+            context.render("{{#if lista_vazia}}SIM{{else}}NÃO{{/if}}"),
+            "NÃO"
+        );
+        assert_eq!(context.render("{{#if lista}}SIM{{else}}NÃO{{/if}}"), "SIM");
+        assert_eq!(
+            context.render("{{#if objeto_vazio}}SIM{{else}}NÃO{{/if}}"),
+            "NÃO"
+        );
+        assert_eq!(context.render("{{#if objeto}}SIM{{else}}NÃO{{/if}}"), "SIM");
     }
 
     #[test]
@@ -915,6 +1147,45 @@ mod tests {
     }
 
     #[test]
+    fn partials_respect_exact_max_depth_boundary() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let dir = std::env::temp_dir().join(format!("rustpress-depth-boundary-{unique}"));
+
+        fs::create_dir_all(&dir).unwrap();
+
+        // Vinte inclusões devem ser permitidas.
+        for index in 0..20 {
+            let content = if index == 19 {
+                "Fim".to_string()
+            } else {
+                format!("{{{{> partial_{}}}}}", index + 1)
+            };
+
+            fs::write(dir.join(format!("partial_{index}.html")), content).unwrap();
+        }
+
+        let result = expand_partials("{{> partial_0}}", dir.to_str().unwrap());
+        assert_eq!(result.unwrap(), "Fim");
+
+        // A vigésima primeira inclusão deve ser rejeitada.
+        fs::write(dir.join("partial_19.html"), "{{> partial_20}}").unwrap();
+        fs::write(dir.join("partial_20.html"), "Fim").unwrap();
+
+        let result = expand_partials("{{> partial_0}}", dir.to_str().unwrap());
+
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn rejects_partial_symlink_outside_directory() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -1021,9 +1292,20 @@ mod tests {
     }
 
     #[test]
+    fn variable_values_are_not_reinterpreted_as_template_expressions() {
+        let mut context = TemplateContext::new();
+        context.set("texto", json!("{{segredo}} <script>"));
+        context.set("segredo", json!("CONTEÚDO PRIVADO"));
+
+        let result = context.render("{{texto}}");
+
+        assert_eq!(result, "{{segredo}} &lt;script&gt;");
+    }
+
+    #[test]
     fn preserves_unknown_variables_for_debugging() {
         let context = TemplateContext::new();
-        let result = context.render_variables("Olá, {{usuario}}!");
+        let result = context.render("Olá, {{usuario}}!");
 
         assert_eq!(result, "Olá, {{usuario}}!");
     }
@@ -1054,11 +1336,21 @@ mod tests {
     }
 
     #[test]
+    fn strict_render_rejects_nested_opening_delimiters() {
+        let context = TemplateContext::new();
+
+        let result = context.render_strict("{{nome {{idade}}");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
     fn normal_render_preserves_unknown_variables() {
         let context = TemplateContext::new();
 
         assert_eq!(context.render("Olá, {{usuario}}!"), "Olá, {{usuario}}!");
     }
+
     #[test]
     fn strict_layout_render_rejects_unknown_variables() {
         use std::fs;
@@ -1430,5 +1722,235 @@ mod tests {
             TemplateContext::validate_template("{{#each alunos}}{{nome-completo}}{{/each}}");
 
         assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
+    fn normal_render_preserves_unclosed_if_as_literal_text() {
+        let mut context = TemplateContext::new();
+        context.set("ativo", serde_json::json!(true));
+
+        let template = "{{#if ativo}}Conteúdo";
+
+        let result = context.render(template);
+
+        assert_eq!(result, "{{#if ativo}}Conteúdo");
+    }
+
+    #[test]
+    fn strict_render_rejects_unclosed_if() {
+        let mut context = TemplateContext::new();
+        context.set("ativo", serde_json::json!(true));
+
+        let template = "{{#if ativo}}Conteúdo";
+
+        let result = context.render_strict(template);
+
+        println!("Resultado do render estrito: {result:?}");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn normal_render_limits_nested_each_depth() {
+        let mut context = TemplateContext::new();
+
+        context.set(
+            "itens",
+            serde_json::json!([
+                {"nome": "Item A"}
+            ]),
+        );
+
+        let mut template = String::new();
+
+        for _ in 0..25 {
+            template.push_str("{{#each itens}}");
+        }
+
+        template.push_str("Conteúdo");
+
+        for _ in 0..25 {
+            template.push_str("{{/each}}");
+        }
+
+        let result = context.render(&template);
+
+        assert!(result.contains("{{#each itens}}"));
+        assert!(result.contains("Conteúdo"));
+        assert!(result.contains("{{/each}}"));
+    }
+
+    #[test]
+    fn normal_render_preserves_each_after_depth_limit() {
+        let mut context = TemplateContext::new();
+
+        context.set(
+            "itens",
+            serde_json::json!([
+                {"nome": "Item A"}
+            ]),
+        );
+
+        let mut template = String::new();
+
+        for _ in 0..25 {
+            template.push_str("{{#each itens}}");
+        }
+
+        template.push_str("{{nome}}");
+
+        for _ in 0..25 {
+            template.push_str("{{/each}}");
+        }
+
+        let result = context.render(&template);
+
+        let remaining_blocks = result.matches("{{#each itens}}").count();
+
+        assert_eq!(
+            remaining_blocks, 4,
+            "O número de blocos não processados foi inesperado. Resultado: {result}"
+        );
+
+        assert!(result.contains("Item A"));
+    }
+
+    #[test]
+    fn normal_render_supports_each_containing_if() {
+        let mut context = TemplateContext::new();
+
+        context.set(
+            "itens",
+            serde_json::json!([
+                {"nome": "Item A"},
+                {"nome": "Item B"}
+            ]),
+        );
+        context.set("ativo", serde_json::json!(true));
+
+        let template = "{{#each itens}}{{#if ativo}}{{nome}};{{/if}}{{/each}}";
+        let result = context.render(template);
+
+        assert_eq!(result, "Item A;Item B;");
+    }
+
+    #[test]
+    fn normal_render_supports_if_containing_each() {
+        let mut context = TemplateContext::new();
+
+        context.set(
+            "itens",
+            serde_json::json!([
+                {"nome": "Item A"},
+                {"nome": "Item B"}
+            ]),
+        );
+        context.set("ativo", serde_json::json!(true));
+
+        let template = "{{#if ativo}}{{#each itens}}{{nome}};{{/each}}{{/if}}";
+        let result = context.render(template);
+
+        assert_eq!(result, "Item A;Item B;");
+    }
+
+    #[test]
+    fn strict_render_rejects_excessive_mixed_nesting() {
+        let mut context = TemplateContext::new();
+
+        context.set(
+            "itens",
+            serde_json::json!([
+                {"nome": "Item A"}
+            ]),
+        );
+        context.set("ativo", serde_json::json!(true));
+
+        let mut template = String::new();
+
+        for _ in 0..12 {
+            template.push_str("{{#each itens}}");
+            template.push_str("{{#if ativo}}");
+        }
+
+        template.push_str("{{nome}}");
+
+        for _ in 0..12 {
+            template.push_str("{{/if}}");
+            template.push_str("{{/each}}");
+        }
+
+        let result = context.render_strict(&template);
+
+        assert!(
+            matches!(result, Err(TemplateError::NestingLimitExceeded)),
+            "Esperava NestingLimitExceeded, mas recebi: {result:?}"
+        );
+    }
+
+    #[test]
+    fn validation_rejects_if_closing_without_open_block() {
+        let result = TemplateContext::validate_template("{{/if}}");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
+    fn validation_rejects_each_closing_without_open_block() {
+        let result = TemplateContext::validate_template("{{/each}}");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
+    fn validation_rejects_if_closing_each_block() {
+        let result = TemplateContext::validate_template("{{#each produtos}}Olá{{/if}}");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
+    fn variable_values_are_not_reinterpreted_inside_if() {
+        let mut context = TemplateContext::new();
+        context.set("ativo", true.into());
+        context.set("mensagem", "{{segredo}}".into());
+        context.set("segredo", "VALOR_PRIVADO".into());
+
+        let result = context
+            .render_strict("{{#if ativo}}{{mensagem}}{{/if}}")
+            .unwrap();
+
+        assert_eq!(result, "{{segredo}}");
+    }
+
+    #[test]
+    fn variable_values_are_not_reinterpreted_inside_each() {
+        let mut context = TemplateContext::new();
+
+        context.set(
+            "mensagens",
+            vec!["{{segredo}}", "<script>alert(1)</script>"].into(),
+        );
+        context.set("segredo", "VALOR_PRIVADO".into());
+
+        let result = context
+            .render_strict("{{#each mensagens}}{{this}}|{{/each}}")
+            .unwrap();
+
+        assert_eq!(result, "{{segredo}}|&lt;script&gt;alert(1)&lt;/script&gt;|");
+    }
+
+    #[test]
+    fn each_preserves_template_expressions_inside_string_values() {
+        let mut context = TemplateContext::new();
+
+        context.set("mensagens", vec!["{{segredo}}", "{{outro_segredo}}"].into());
+        context.set("segredo", "PRIVADO_1".into());
+        context.set("outro_segredo", "PRIVADO_2".into());
+
+        let result = context
+            .render_strict("{{#each mensagens}}{{this}}|{{/each}}")
+            .unwrap();
+
+        assert_eq!(result, "{{segredo}}|{{outro_segredo}}|");
     }
 }
