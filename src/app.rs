@@ -1,7 +1,12 @@
 use hyper::http::Method;
 
 use crate::{
-    MiddlewareResult, TemplateContext, request::Request, response::Response, router::Router, server,
+    MiddlewareResult, TemplateContext,
+    logger::{Level, Logger},
+    request::Request,
+    response::Response,
+    router::Router,
+    server,
 };
 
 use std::{
@@ -17,6 +22,7 @@ type ServerError = Box<dyn std::error::Error + Send + Sync>;
 /// middleware e serviços estáticos e, em seguida, iniciar o servidor HTTP.
 pub struct App {
     router: Router,
+    logger: Logger,
 }
 
 impl App {
@@ -26,7 +32,13 @@ impl App {
     pub fn new() -> Self {
         Self {
             router: Router::new(),
+            logger: Logger::new(),
         }
+    }
+
+    /// Define o nível mínimo de registo da aplicação.
+    pub fn set_log_level(&mut self, level: Level) {
+        self.logger.set_level(level);
     }
 
     /// Define o handler global para erros das rotas.
@@ -55,14 +67,14 @@ impl App {
 
     /// Inicia o servidor HTTP na interface e porta indicadas.
     pub async fn listen(self, address: &str) -> Result<(), ServerError> {
-        server::listen(address, self.router).await
+        server::listen(address, self.router, self.logger).await
     }
 
     pub async fn serve_listener(
         self,
         listener: tokio::net::TcpListener,
     ) -> Result<(), ServerError> {
-        server::serve(listener, self.router).await
+        server::serve(listener, self.router, self.logger).await
     }
 
     /// Regista um handler para pedidos HTTP do tipo PUT.
