@@ -1,4 +1,5 @@
-use std::{convert::Infallible, error::Error};
+
+use std::{convert::Infallible, error::Error, time::Instant};
 
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -28,7 +29,23 @@ pub(crate) async fn serve(listener: TcpListener, router: Router) -> Result<(), S
             let service = service_fn(move |request| {
                 let router = router.clone();
 
-                async move { Ok::<_, Infallible>(router.handle(request)) }
+                async move {
+                    let method = request.method().clone();
+                    let path = request.uri().path().to_owned();
+                    let start = Instant::now();
+
+                    let response = router.handle(request);
+
+                    println!(
+                        "[RustPress] {} {} → {} ({} ms)",
+                        method,
+                        path,
+                        response.status().as_u16(),
+                        start.elapsed().as_millis()
+                    );
+
+                    Ok::<_, Infallible>(response)
+                }
             });
 
             if let Err(error) = http1::Builder::new().serve_connection(io, service).await {

@@ -193,8 +193,9 @@ fn returns_404_for_missing_static_file() {
     let response = request_static_file("/assets/ficheiro-inexistente.txt");
 
     assert!(response.contains("404 Not Found"), "{response}");
-
-    assert!(response.contains("Erro HTTP 404"), "{response}");
+    assert!(response.contains("Página não encontrada"), "{response}");
+    assert!(response.contains("Voltar à página inicial"), "{response}");
+    assert!(response.contains("Desenvolvido com RustPress"), "{response}");
 }
 
 #[test]
@@ -279,8 +280,8 @@ fn returns_404_for_missing_nested_static_file() {
     );
 
     assert!(
-        response.contains("Erro HTTP 404"),
-        "Era esperada a mensagem de erro 404:\n{response}"
+        response.contains("Página não encontrada"),
+        "Era esperada a página personalizada 404:\n{response}"
     );
 
     assert!(

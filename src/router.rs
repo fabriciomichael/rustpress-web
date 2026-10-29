@@ -295,11 +295,12 @@ impl Router {
                 match handler(request, Response::new()) {
                     Ok(response) => response.into_hyper(),
                     Err(error) => {
-                        eprintln!("Erro no handler: {error}");
-
                         match &self.error_handler {
                             Some(error_handler) => error_handler(&error, &context).into_hyper(),
-                            None => self.error_response(error.status()).into_hyper(),
+                            None => {
+                                eprintln!("Erro no handler: {error}");
+                                self.error_response(error.status()).into_hyper()
+                            }
                         }
                     }
                 }
