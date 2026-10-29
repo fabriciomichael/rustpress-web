@@ -4,7 +4,9 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request as HyperRequest, Response as HyperResponse, body::Incoming, http::Method};
 
-use crate::{HandlerError, TemplateContext, request::Request, response::Response};
+use crate::{
+    HandlerError, MiddlewareResult, TemplateContext, request::Request, response::Response,
+};
 
 /// Tipo que representa um handler de rota.
 ///
@@ -16,11 +18,8 @@ type MatchedRoute = (String, Handler, Vec<(String, String)>);
 /// Tipo que representa o handler global de erros.
 type ErrorHandler = Arc<dyn Fn(&HandlerError, &crate::RequestContext) -> Response + Send + Sync>;
 
-/// Tipo que representa um middleware de pipeline.
-///
-/// Middleware executa-se antes do handler principal e pode interromper o fluxo
-/// devolvendo `Some(Response)`.
-type Middleware = Arc<dyn Fn(&Request) -> Option<Response> + Send + Sync>;
+/// Tipo que representa um middleware da cadeia de execução.
+type Middleware = Arc<dyn Fn(&Request) -> MiddlewareResult + Send + Sync>;
 
 type RouteKey = (Method, String);
 
@@ -255,15 +254,34 @@ impl Router {
 
         let request = Request::new(request, params);
 
-        for middleware in &self.middlewares {
-            if let Some(response) = middleware(&request) {
-                let mut response = response.into_hyper();
+        let context = request.context();
 
-                if method == Method::HEAD {
-                    *response.body_mut() = Full::new(Bytes::new());
+        for middleware in &self.middlewares {
+            match middleware(&request) {
+                MiddlewareResult::Next => {}
+
+                MiddlewareResult::Respond(response) => {
+                    let mut response = response.into_hyper();
+
+                    if method == Method::HEAD {
+                        *response.body_mut() = Full::new(Bytes::new());
+                    }
+
+                    return response;
                 }
 
-                return response;
+                MiddlewareResult::Error(error) => {
+                    let mut response = match &self.error_handler {
+                        Some(error_handler) => error_handler(&error, &context).into_hyper(),
+                        None => self.error_response(error.status()).into_hyper(),
+                    };
+
+                    if method == Method::HEAD {
+                        *response.body_mut() = Full::new(Bytes::new());
+                    }
+
+                    return response;
+                }
             }
         }
 
@@ -329,6 +347,17 @@ impl Router {
     pub(crate) fn use_middleware<F>(&mut self, middleware: F)
     where
         F: Fn(&Request) -> Option<Response> + Send + Sync + 'static,
+    {
+        self.middlewares
+            .push(Arc::new(move |request| match middleware(request) {
+                Some(response) => MiddlewareResult::Respond(response),
+                None => MiddlewareResult::Next,
+            }));
+    }
+
+    pub(crate) fn use_middleware_advanced<F>(&mut self, middleware: F)
+    where
+        F: Fn(&Request) -> MiddlewareResult + Send + Sync + 'static,
     {
         self.middlewares.push(Arc::new(middleware));
     }

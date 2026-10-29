@@ -1,6 +1,8 @@
 use hyper::http::Method;
 
-use crate::{TemplateContext, request::Request, response::Response, router::Router, server};
+use crate::{
+    MiddlewareResult, TemplateContext, request::Request, response::Response, router::Router, server,
+};
 
 use std::{
     fs,
@@ -120,6 +122,17 @@ impl App {
         F: Fn(&Request) -> Option<Response> + Send + Sync + 'static,
     {
         self.router.use_middleware(middleware);
+    }
+
+    /// Regista um middleware avançado na cadeia global.
+    ///
+    /// O middleware pode continuar a execução, devolver uma resposta
+    /// imediatamente ou encaminhar um erro para o handler global.
+    pub fn use_middleware_advanced<F>(&mut self, middleware: F)
+    where
+        F: Fn(&Request) -> MiddlewareResult + Send + Sync + 'static,
+    {
+        self.router.use_middleware_advanced(middleware);
     }
 
     /// Serve ficheiros locais a partir de uma pasta do sistema de ficheiros.

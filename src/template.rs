@@ -985,9 +985,8 @@ mod tests {
     fn renders_else_when_if_variable_is_missing() {
         let context = TemplateContext::new();
 
-        let result = context.render(
-            "{{#if utilizador_inexistente}}Bem-vindo{{else}}Visitante{{/if}}"
-        );
+        let result =
+            context.render("{{#if utilizador_inexistente}}Bem-vindo{{else}}Visitante{{/if}}");
 
         assert_eq!(result, "Visitante");
     }
