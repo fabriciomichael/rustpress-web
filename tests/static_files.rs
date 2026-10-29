@@ -444,3 +444,38 @@ fn fallible_handler_returns_custom_status_without_leaking_error() {
         "A resposta revelou detalhes internos: {response}"
     );
 }
+
+#[test]
+fn global_error_handler_customizes_response_using_request_context() {
+    let mut app = App::new();
+
+    app.get("/erro-global", |_req, _res| {
+        Err(HandlerError::new("detalhes internos confidenciais"))
+    })
+    .expect("Erro ao registar a rota");
+
+    app.set_error_handler(|error, context| {
+        Response::new().status(error.status()).send(format!(
+            "Erro ao processar {} {}",
+            context.method(),
+            context.path()
+        ))
+    });
+
+    let response = request_with_app(app, "GET", "/erro-global");
+
+    assert!(
+        response.contains("500 Internal Server Error"),
+        "Código HTTP inesperado: {response}"
+    );
+
+    assert!(
+        response.contains("Erro ao processar GET /erro-global"),
+        "A resposta personalizada não foi encontrada: {response}"
+    );
+
+    assert!(
+        !response.contains("detalhes internos confidenciais"),
+        "A resposta revelou detalhes internos: {response}"
+    );
+}

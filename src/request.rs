@@ -62,4 +62,71 @@ impl Request {
             if key == name { Some(value) } else { None }
         })
     }
+
+    /// Cria uma cópia dos metadados para o tratamento de erros.
+    pub fn context(&self) -> RequestContext {
+        RequestContext {
+            method: self.inner.method().clone(),
+            path: self.inner.uri().path().to_owned(),
+            params: self.params.clone(),
+            query: self.inner.uri().query().map(str::to_owned),
+            headers: self
+                .inner
+                .headers()
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (name.as_str().to_owned(), value.to_owned()))
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Contexto leve da requisição, disponível durante o tratamento de erros.
+#[derive(Debug, Clone)]
+pub struct RequestContext {
+    method: hyper::http::Method,
+    path: String,
+    params: Vec<(String, String)>,
+    query: Option<String>,
+    headers: Vec<(String, String)>,
+}
+
+impl RequestContext {
+    /// Devolve o método HTTP da requisição.
+    pub fn method(&self) -> &hyper::http::Method {
+        &self.method
+    }
+
+    /// Devolve o caminho da requisição.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Devolve o valor de um parâmetro da rota.
+    pub fn param(&self, name: &str) -> Option<&str> {
+        self.params
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// Devolve um parâmetro da query string.
+    pub fn query(&self, name: &str) -> Option<&str> {
+        self.query.as_deref()?.split('&').find_map(|pair| {
+            let (key, value) = pair.split_once('=')?;
+            (key == name).then_some(value)
+        })
+    }
+
+    /// Devolve o valor de um cabeçalho HTTP.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
 }

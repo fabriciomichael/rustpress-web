@@ -12,6 +12,9 @@ use crate::{HandlerError, TemplateContext, request::Request, response::Response}
 /// construção e devolve a resposta final a enviar ao cliente.
 type Handler = Arc<dyn Fn(Request, Response) -> Result<Response, HandlerError> + Send + Sync>;
 
+/// Tipo que representa o handler global de erros.
+type ErrorHandler = Arc<dyn Fn(&HandlerError, &crate::RequestContext) -> Response + Send + Sync>;
+
 /// Tipo que representa um middleware de pipeline.
 ///
 /// Middleware executa-se antes do handler principal e pode interromper o fluxo
@@ -29,6 +32,7 @@ type RouteKey = (Method, String);
 pub(crate) struct Router {
     routes: HashMap<RouteKey, Handler>,
     middlewares: Vec<Middleware>,
+    error_handler: Option<ErrorHandler>,
 }
 
 impl Router {
@@ -67,6 +71,14 @@ impl Router {
             .insert((method, path.to_owned()), Arc::new(handler));
 
         Ok(())
+    }
+
+    /// Regista o handler global para erros das rotas.
+    pub(crate) fn set_error_handler<F>(&mut self, handler: F)
+    where
+        F: Fn(&HandlerError, &crate::RequestContext) -> Response + Send + Sync + 'static,
+    {
+        self.error_handler = Some(Arc::new(handler));
     }
 
     /// Compara um padrão de rota com o caminho da requisição.
@@ -262,13 +274,22 @@ impl Router {
         }
 
         let mut response = match matched {
-            Some((handler, _)) => match handler(request, Response::new()) {
-                Ok(response) => response.into_hyper(),
-                Err(error) => {
-                    eprintln!("Erro no handler: {error}");
-                    self.error_response(error.status()).into_hyper()
+            Some((handler, _)) => {
+                // Guardamos os metadados antes de mover Request para o handler.
+                let context = request.context();
+
+                match handler(request, Response::new()) {
+                    Ok(response) => response.into_hyper(),
+                    Err(error) => {
+                        eprintln!("Erro no handler: {error}");
+
+                        match &self.error_handler {
+                            Some(error_handler) => error_handler(&error, &context).into_hyper(),
+                            None => self.error_response(error.status()).into_hyper(),
+                        }
+                    }
                 }
-            },
+            }
 
             None if self.path_exists(&path) => {
                 let allow = self

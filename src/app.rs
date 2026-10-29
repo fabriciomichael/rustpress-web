@@ -27,6 +27,14 @@ impl App {
         }
     }
 
+    /// Define o handler global para erros das rotas.
+    pub fn set_error_handler<F>(&mut self, handler: F)
+    where
+        F: Fn(&crate::HandlerError, &crate::RequestContext) -> Response + Send + Sync + 'static,
+    {
+        self.router.set_error_handler(handler);
+    }
+
     /// Regista um handler GET que pode devolver um erro.
     pub fn get<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where

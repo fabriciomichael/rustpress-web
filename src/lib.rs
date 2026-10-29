@@ -8,6 +8,6 @@ mod template;
 
 pub use app::App;
 pub use handler_error::HandlerError;
-pub use request::Request;
+pub use request::{Request, RequestContext};
 pub use response::Response;
 pub use template::TemplateContext;
