@@ -266,7 +266,7 @@ impl Router {
                 Ok(response) => response.into_hyper(),
                 Err(error) => {
                     eprintln!("Erro no handler: {error}");
-                    self.error_response(500).into_hyper()
+                    self.error_response(error.status()).into_hyper()
                 }
             },
 

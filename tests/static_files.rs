@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rustpress::{App, Request, Response};
+use rustpress::{App, HandlerError, Request, Response};
 use tokio::net::TcpListener;
 
 fn request_with_app(app: App, method: &str, path: &str) -> String {
@@ -421,5 +421,26 @@ fn middleware_response_stops_handler_execution() {
     assert!(
         !response.contains("Handler executado"),
         "O handler foi executado apesar da interrupção:\n{response}"
+    );
+}
+
+#[test]
+fn fallible_handler_returns_custom_status_without_leaking_error() {
+    let mut app = App::new();
+
+    app.get("/erro-personalizado", |_req, _res| {
+        Err(HandlerError::with_status(
+            404,
+            "detalhes internos confidenciais",
+        ))
+    })
+    .expect("Erro ao registar a rota");
+
+    let response = request_with_app(app, "GET", "/erro-personalizado");
+
+    assert!(response.contains("404 Not Found"), "{response}");
+    assert!(
+        !response.contains("detalhes internos confidenciais"),
+        "A resposta revelou detalhes internos: {response}"
     );
 }
