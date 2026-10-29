@@ -27,20 +27,20 @@ impl App {
         }
     }
 
-    /// Regista um handler para pedidos HTTP do tipo GET.
+    /// Regista um handler GET que pode devolver um erro.
     pub fn get<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
-        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
     {
-        self.router.add(Method::GET, path, handler)
+        self.router.add_fallible(Method::GET, path, handler)
     }
 
-    /// Regista um handler para pedidos HTTP do tipo POST.
+    /// Regista um handler POST que pode devolver um erro.
     pub fn post<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
-        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
     {
-        self.router.add(Method::POST, path, handler)
+        self.router.add_fallible(Method::POST, path, handler)
     }
 
     /// Inicia o servidor HTTP na interface e porta indicadas.
@@ -229,7 +229,7 @@ impl App {
                         Ok(metadata) => Some(
                             Response::new()
                                 .header("Content-Type", mime)
-                                .header("Content-Length", &metadata.len().to_string()),
+                                .content_length(metadata.len()),
                         ),
                         Err(_) => Some(render_error_page(
                             500,
@@ -258,22 +258,6 @@ impl App {
                 }
             }
         });
-    }
-
-    /// Regista um handler GET que pode devolver um erro.
-    pub fn get_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
-    where
-        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
-    {
-        self.router.add_fallible(Method::GET, path, handler)
-    }
-
-    /// Regista um handler POST que pode devolver um erro.
-    pub fn post_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
-    where
-        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
-    {
-        self.router.add_fallible(Method::POST, path, handler)
     }
 }
 

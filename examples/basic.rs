@@ -14,12 +14,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     contexto.set("autenticado", json!(true));
 
     app.get("/", move |_req: Request, res: Response| {
-        res.render_view(
+        Ok(res.render(
             "views/pages/index.html",
             "views/layouts/main.html",
             "views/partials",
             &contexto,
-        )
+        ))
     })
     .expect("Não foi possível registar a rota GET /perfil");
 
@@ -31,16 +31,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // A captura por valor transfere o contexto para o handler registado.
     app.get("/perfil", move |_req: Request, res: Response| {
-        res.render_view(
+        Ok(res.render(
             "views/pages/perfil.html",
             "views/layouts/main.html",
             "views/partials",
             &profile,
-        )
+        ))
     })
     .expect("Não foi possível registar a rota GET /perfil");
 
-    app.get_fallible("/ficheiro", |_req, res| {
+    app.get("/ficheiro", |_req, res| {
         let conteudo = std::fs::read_to_string("dados.txt")?;
 
         Ok(res.send(conteudo))

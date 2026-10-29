@@ -1,4 +1,4 @@
-use std::{fmt::Display, fs, path::Path};
+use std::{fs, path::Path};
 
 use http_body_util::Full;
 use hyper::{
@@ -20,6 +20,7 @@ pub struct Response {
     body: Bytes,
     content_type: HeaderValue,
     headers: HeaderMap,
+    content_length: Option<u64>,
 }
 
 impl Response {
@@ -31,12 +32,18 @@ impl Response {
             body: Bytes::new(),
             content_type: HeaderValue::from_static("text/plain; charset=utf-8"),
             headers: HeaderMap::new(),
+            content_length: None,
         }
     }
 
-    /// Define o código de estado HTTP da resposta.
+    ///Sets the HTTP status code of the response.
     pub fn status(mut self, code: u16) -> Self {
-        self.status = StatusCode::from_u16(code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        self.status = if (100..=599).contains(&code) {
+            StatusCode::from_u16(code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+
         self
     }
 
@@ -70,53 +77,21 @@ impl Response {
         self
     }
 
-    /// Carrega um ficheiro do disco e devolve o conteúdo como resposta HTML.
-    pub fn render(mut self, path: impl AsRef<Path>) -> Self {
+    /// Loads a file from disk and returns its contents as an HTML response.
+    pub fn render_file(mut self, path: impl AsRef<Path>) -> Self {
         match fs::read(path) {
             Ok(content) => {
                 self.body = Bytes::from(content);
                 self.content_type = HeaderValue::from_static("text/html; charset=utf-8");
             }
-            Err(_) => {
+            Err(error) => {
+                eprintln!("Error loading HTML file: {error}");
+
                 self.status = StatusCode::INTERNAL_SERVER_ERROR;
-                self.body = Bytes::from("Não foi possível renderizar a página.");
+                self.body = Bytes::from("Internal error while loading the HTML file.");
+                self.content_type = HeaderValue::from_static("text/plain; charset=utf-8");
             }
         }
-
-        self
-    }
-
-    /// Renderiza um template substituindo variáveis em formato `{{ nome }}`.
-    ///
-    /// Esta variante suporta a substituição manual de valores de uma coleção de
-    /// pares chave/valor. A função também escapa conteúdo HTML para evitar
-    /// injeções simples em templates.
-    pub fn render_with<I, K, V>(mut self, path: impl AsRef<Path>, data: I) -> Self
-    where
-        I: IntoIterator<Item = (K, V)>,
-        K: AsRef<str>,
-        V: Display,
-    {
-        let mut template = match fs::read_to_string(path) {
-            Ok(content) => content,
-            Err(_) => {
-                self.status = StatusCode::INTERNAL_SERVER_ERROR;
-                self.body = Bytes::from("Não foi possível renderizar o template.");
-                return self;
-            }
-        };
-
-        for (key, value) in data {
-            let key = key.as_ref();
-            let value = escape_html(&value.to_string());
-
-            template = template.replace(&format!("{{{{ {key} }}}}"), &value);
-
-            template = template.replace(&format!("{{{{{key}}}}}"), &value);
-        }
-
-        self.body = Bytes::from(template);
-        self.content_type = HeaderValue::from_static("text/html; charset=utf-8");
 
         self
     }
@@ -154,7 +129,7 @@ impl Response {
     /// entrega ao cliente.
 
     pub(crate) fn into_hyper(self) -> HyperResponse<Full<Bytes>> {
-        let body_length = self.body.len();
+        let body_length = self.content_length.unwrap_or(self.body.len() as u64);
 
         let mut response = HyperResponse::new(Full::new(self.body));
 
@@ -166,60 +141,28 @@ impl Response {
 
         response.headers_mut().extend(self.headers);
 
-        if !response.headers().contains_key(CONTENT_LENGTH) {
-            if let Ok(value) = HeaderValue::from_str(&body_length.to_string()) {
-                response.headers_mut().insert(CONTENT_LENGTH, value);
-            }
+        if let Ok(value) = HeaderValue::from_str(&body_length.to_string()) {
+            response.headers_mut().insert(CONTENT_LENGTH, value);
         }
 
         response
     }
 
-    /// Renderiza um template HTML usando um contexto estruturado de dados.
-    ///
-    /// Este método lê um ficheiro de template e aplica os valores armazenados em
-    /// `TemplateContext`, permitindo uma integração mais robusta com páginas
-    /// dinâmicas.
+    /// Renders an HTML template using the provided context.
     pub fn render_template(mut self, path: &str, context: &TemplateContext) -> Self {
         match std::fs::read_to_string(path) {
             Ok(template) => {
                 let html = context.render(&template);
 
-                self.body = bytes::Bytes::from(html);
-                self.content_type = http::HeaderValue::from_static("text/html; charset=utf-8");
+                self.body = Bytes::from(html);
+                self.content_type = HeaderValue::from_static("text/html; charset=utf-8");
             }
             Err(error) => {
-                eprintln!("Erro ao carregar o template '{}': {}", path, error);
+                eprintln!("Error loading template '{path}': {error}");
 
-                self.status = http::StatusCode::INTERNAL_SERVER_ERROR;
-
-                self.body = bytes::Bytes::from("Erro interno ao renderizar a página.");
-
-                self.content_type = http::HeaderValue::from_static("text/plain; charset=utf-8");
-            }
-        }
-
-        self
-    }
-
-    pub fn render_view(
-        mut self,
-        page_path: &str,
-        layout_path: &str,
-        partials_dir: &str,
-        context: &crate::TemplateContext,
-    ) -> Self {
-        match context.render_with_layout(page_path, layout_path, partials_dir) {
-            Ok(html) => {
-                self.body = bytes::Bytes::from(html);
-                self.content_type = http::HeaderValue::from_static("text/html; charset=utf-8");
-            }
-            Err(error) => {
-                eprintln!("Erro ao renderizar a página: {error}");
-
-                self.status = http::StatusCode::INTERNAL_SERVER_ERROR;
-                self.body = bytes::Bytes::from("Erro interno ao renderizar a página.");
-                self.content_type = http::HeaderValue::from_static("text/plain; charset=utf-8");
+                self.status = StatusCode::INTERNAL_SERVER_ERROR;
+                self.body = Bytes::from("Internal error while rendering the page.");
+                self.content_type = HeaderValue::from_static("text/plain; charset=utf-8");
             }
         }
 
@@ -230,7 +173,7 @@ impl Response {
     ///
     /// Devolve HTTP 500 quando uma variável não está definida ou ocorre
     /// um erro ao carregar os templates ou os partials.
-    pub fn render_view_strict(
+    pub fn render(
         mut self,
         page_path: &str,
         layout_path: &str,
@@ -243,10 +186,10 @@ impl Response {
                 self.content_type = HeaderValue::from_static("text/html; charset=utf-8");
             }
             Err(error) => {
-                eprintln!("Erro ao renderizar a página (modo rigoroso): {error}");
+                eprintln!("Error rendering the page: {error}");
 
                 self.status = StatusCode::INTERNAL_SERVER_ERROR;
-                self.body = Bytes::from("Erro interno ao renderizar a página.");
+                self.body = Bytes::from("Internal error while rendering the page.");
                 self.content_type = HeaderValue::from_static("text/plain; charset=utf-8");
             }
         }
@@ -276,17 +219,11 @@ impl Response {
             }
         }
     }
-}
 
-/// Escapa sequências HTML para impedir que valores dinâmicos quebrem a
-/// estrutura do template no browser.
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
+    pub(crate) fn content_length(mut self, length: u64) -> Self {
+        self.content_length = Some(length);
+        self
+    }
 }
 
 impl Default for Response {
@@ -308,11 +245,84 @@ mod tests {
     }
 
     #[test]
+    fn status_accepts_valid_http_code() {
+        let response = Response::new().status(201);
+
+        assert_eq!(response.status, StatusCode::CREATED);
+    }
+
+    #[test]
+    fn status_falls_back_to_500_for_invalid_http_code() {
+        let response = Response::new().status(999);
+
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn header_sets_custom_header() {
+        let response = Response::new().header("X-Request-Id", "abc123");
+
+        assert_eq!(response.headers.get("X-Request-Id").unwrap(), "abc123");
+    }
+
+    #[test]
+    fn header_updates_content_type() {
+        let response = Response::new().header("Content-Type", "application/xml");
+
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("application/xml")
+        );
+    }
+
+    #[test]
+    fn send_returns_plain_text_and_preserves_body() {
+        let expected_body = "Resposta do RustPress";
+
+        let response = Response::new().send(expected_body);
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("text/plain; charset=utf-8")
+        );
+        assert_eq!(&response.body[..], expected_body.as_bytes());
+    }
+
+    #[test]
+    fn html_returns_html_content_type_and_preserves_body() {
+        let expected_html = "<h1>RustPress</h1>";
+
+        let response = Response::new().html(expected_html);
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("text/html; charset=utf-8")
+        );
+        assert_eq!(&response.body[..], expected_html.as_bytes());
+    }
+
+    #[test]
     fn creates_method_not_allowed_response() {
         let response = Response::error(405, "Method Not Allowed");
 
         assert_eq!(response.status, StatusCode::METHOD_NOT_ALLOWED);
         assert_eq!(&response.body[..], b"Method Not Allowed");
+    }
+
+    #[test]
+    fn json_returns_json_content_type_and_preserves_body() {
+        let expected_json = r#"{"message":"RustPress","success":true}"#;
+
+        let response = Response::new().json(expected_json);
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("application/json; charset=utf-8")
+        );
+        assert_eq!(&response.body[..], expected_json.as_bytes());
     }
 
     #[test]
@@ -366,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn render_view_strict_returns_500_for_undefined_variable() {
+    fn render_returns_500_for_undefined_variable() {
         use std::{
             fs,
             time::{SystemTime, UNIX_EPOCH},
@@ -390,7 +400,7 @@ mod tests {
 
         let context = TemplateContext::new();
 
-        let response = Response::new().render_view_strict(
+        let response = Response::new().render(
             page.to_str().unwrap(),
             layout.to_str().unwrap(),
             partials.to_str().unwrap(),
@@ -403,7 +413,44 @@ mod tests {
     }
 
     #[test]
-    fn render_view_strict_returns_html_for_valid_template() {
+    fn render_returns_500_for_undefined_variable_with_strict_validation() {
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let base = std::env::temp_dir().join(format!("rustpress-response-strict-{unique}"));
+
+        let partials = base.join("partials");
+        fs::create_dir_all(&partials).unwrap();
+
+        let page = base.join("pagina.html");
+        let layout = base.join("layout.html");
+
+        fs::write(&page, "<h1>{{usuario}}</h1>").unwrap();
+        fs::write(&layout, "<html><body>{{{conteudo}}}</body></html>").unwrap();
+
+        let context = TemplateContext::new();
+
+        let response = Response::new().render(
+            page.to_str().unwrap(),
+            layout.to_str().unwrap(),
+            partials.to_str().unwrap(),
+            &context,
+        );
+
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn render_returns_html_for_valid_template() {
         use serde_json::json;
         use std::{
             fs,
@@ -429,7 +476,7 @@ mod tests {
         let mut context = TemplateContext::new();
         context.set("titulo", json!("RustPress"));
 
-        let response = Response::new().render_view_strict(
+        let response = Response::new().render(
             page.to_str().unwrap(),
             layout.to_str().unwrap(),
             partials.to_str().unwrap(),
@@ -449,7 +496,53 @@ mod tests {
     }
 
     #[test]
-    fn render_view_strict_returns_500_for_invalid_syntax() {
+    fn render_returns_html_for_valid_template_with_strict_validation() {
+        use serde_json::json;
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let base = std::env::temp_dir().join(format!("rustpress-response-valid-{unique}"));
+
+        let partials = base.join("partials");
+        fs::create_dir_all(&partials).unwrap();
+
+        let page = base.join("pagina.html");
+        let layout = base.join("layout.html");
+
+        fs::write(&page, "<h1>{{titulo}}</h1>").unwrap();
+        fs::write(&layout, "<html><body>{{{conteudo}}}</body></html>").unwrap();
+
+        let mut context = TemplateContext::new();
+        context.set("titulo", json!("RustPress"));
+
+        let response = Response::new().render(
+            page.to_str().unwrap(),
+            layout.to_str().unwrap(),
+            partials.to_str().unwrap(),
+            &context,
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("text/html; charset=utf-8")
+        );
+
+        let body = String::from_utf8(response.body.to_vec()).unwrap();
+        assert!(body.contains("<h1>RustPress</h1>"));
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn render_returns_500_for_invalid_syntax_with_strict_validation() {
         use std::{
             fs,
             time::{SystemTime, UNIX_EPOCH},
@@ -474,7 +567,7 @@ mod tests {
 
         let context = TemplateContext::new();
 
-        let response = Response::new().render_view_strict(
+        let response = Response::new().render(
             page.to_str().unwrap(),
             layout.to_str().unwrap(),
             partials.to_str().unwrap(),
@@ -485,10 +578,239 @@ mod tests {
 
         let body = String::from_utf8(response.body.to_vec()).unwrap();
 
-        assert_eq!(body, "Erro interno ao renderizar a página.");
+        assert_eq!(body, "Internal error while rendering the page.");
         assert!(!body.contains("Erro de sintaxe"));
         assert!(!body.contains("TemplateError"));
 
         fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn render_returns_500_for_invalid_syntax() {
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let base = std::env::temp_dir().join(format!("rustpress-response-invalid-syntax-{unique}"));
+
+        let partials = base.join("partials");
+        fs::create_dir_all(&partials).unwrap();
+
+        let page = base.join("pagina.html");
+        let layout = base.join("layout.html");
+
+        // O bloco if está aberto e não tem fecho.
+        fs::write(&page, "<h1>{{#if titulo}}Olá</h1>").unwrap();
+        fs::write(&layout, "<html><body>{{{conteudo}}}</body></html>").unwrap();
+
+        let context = TemplateContext::new();
+
+        let response = Response::new().render(
+            page.to_str().unwrap(),
+            layout.to_str().unwrap(),
+            partials.to_str().unwrap(),
+            &context,
+        );
+
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body = String::from_utf8(response.body.to_vec()).unwrap();
+
+        assert_eq!(body, "Internal error while rendering the page.");
+        assert!(!body.contains("Erro de sintaxe"));
+        assert!(!body.contains("TemplateError"));
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn render_template_returns_html_for_valid_template() {
+        use serde_json::json;
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let path = std::env::temp_dir().join(format!("rustpress-render-template-{unique}.html"));
+
+        fs::write(&path, "<h1>{{titulo}}</h1>").unwrap();
+
+        let mut context = TemplateContext::new();
+        context.set("titulo", json!("RustPress"));
+
+        let response = Response::new().render_template(path.to_str().unwrap(), &context);
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("text/html; charset=utf-8")
+        );
+
+        let body = String::from_utf8(response.body.to_vec()).unwrap();
+        assert!(body.contains("<h1>RustPress</h1>"));
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn render_template_returns_500_when_template_is_missing() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let path = std::env::temp_dir().join(format!("rustpress-missing-template-{unique}.html"));
+
+        let response =
+            Response::new().render_template(path.to_str().unwrap(), &TemplateContext::new());
+
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("text/plain; charset=utf-8")
+        );
+
+        let body = String::from_utf8(response.body.to_vec()).unwrap();
+        assert_eq!(body, "Internal error while rendering the page.");
+
+        // Garante que o ficheiro de teste não ficou criado.
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn render_file_returns_html_for_existing_file() {
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let path = std::env::temp_dir().join(format!("rustpress-render-file-{unique}.html"));
+
+        let expected_html = "<h1>RustPress</h1>";
+        fs::write(&path, expected_html).unwrap();
+
+        let response = Response::new().render_file(&path);
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("text/html; charset=utf-8")
+        );
+
+        let body = String::from_utf8(response.body.to_vec()).unwrap();
+        assert_eq!(body, expected_html);
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn render_file_returns_500_when_file_is_missing() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let path = std::env::temp_dir().join(format!("rustpress-missing-file-{unique}.html"));
+
+        let response = Response::new().render_file(&path);
+
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("text/plain; charset=utf-8")
+        );
+
+        let body = String::from_utf8(response.body.to_vec()).unwrap();
+        assert_eq!(body, "Internal error while loading the HTML file.");
+
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn header_ignores_invalid_header_name() {
+        let response = Response::new().header("Invalid Header", "value");
+
+        assert!(response.headers.is_empty());
+    }
+
+    #[test]
+    fn header_ignores_invalid_header_value() {
+        let response = Response::new().header("X-Test", "value\ninvalid");
+
+        assert!(response.headers.is_empty());
+    }
+
+    #[test]
+    fn into_hyper_preserves_status_body_and_headers() {
+        let response = Response::new()
+            .status(201)
+            .header("X-Request-Id", "abc123")
+            .send("Criado com sucesso");
+
+        let hyper_response = response.into_hyper();
+
+        assert_eq!(hyper_response.status(), StatusCode::CREATED);
+
+        assert_eq!(
+            hyper_response.headers().get("X-Request-Id").unwrap(),
+            "abc123"
+        );
+
+        assert_eq!(
+            hyper_response.headers().get(CONTENT_TYPE).unwrap(),
+            "text/plain; charset=utf-8"
+        );
+
+        assert_eq!(hyper_response.headers().get(CONTENT_LENGTH).unwrap(), "18");
+    }
+
+    #[tokio::test]
+    async fn into_hyper_preserves_body_content() {
+        use http_body_util::BodyExt;
+
+        let expected_body = "Criado com sucesso";
+
+        let response = Response::new().send(expected_body);
+        let hyper_response = response.into_hyper();
+
+        let body = hyper_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+
+        assert_eq!(&body[..], expected_body.as_bytes());
+    }
+
+    #[test]
+    fn into_hyper_corrects_inconsistent_content_length() {
+        let response = Response::new()
+            .header("Content-Length", "100")
+            .send("Teste");
+
+        let hyper_response = response.into_hyper();
+
+        assert_eq!(hyper_response.headers().get(CONTENT_LENGTH).unwrap(), "5");
     }
 }

@@ -424,6 +424,21 @@ impl TemplateContext {
         Ok(output)
     }
 
+    /// Prepara uma página com layout e partials.
+    fn prepare_layout(
+        &self,
+        page_path: &str,
+        layout_path: &str,
+        partials_dir: &str,
+    ) -> std::io::Result<String> {
+        let page = std::fs::read_to_string(page_path)?;
+        let layout = std::fs::read_to_string(layout_path)?;
+
+        let combined = layout.replace("{{{conteudo}}}", &page);
+
+        expand_partials(&combined, partials_dir)
+    }
+
     /// Compõe uma página usando um layout e partials reutilizáveis.
     pub fn render_with_layout(
         &self,
@@ -431,20 +446,8 @@ impl TemplateContext {
         layout_path: &str,
         partials_dir: &str,
     ) -> std::io::Result<String> {
-        // 1. Ler o conteúdo específico da página.
-        let page = std::fs::read_to_string(page_path)?;
-
-        // 2. Ler o layout principal.
-        let layout = std::fs::read_to_string(layout_path)?;
-
-        // 3. Inserir o conteúdo da página no layout.
-        let combined = layout.replace("{{{conteudo}}}", &page);
-
-        // 4. Processar os partials.
-        let combined = expand_partials(&combined, partials_dir)?;
-
-        // 5. Renderizar variáveis, condições e ciclos.
-        Ok(self.render(&combined))
+        self.prepare_layout(page_path, layout_path, partials_dir)
+            .map(|template| self.render(&template))
     }
     /// Verifica se o nome de uma variável é válido.
     fn is_valid_variable_name(key: &str) -> bool {
@@ -465,13 +468,9 @@ impl TemplateContext {
         layout_path: &str,
         partials_dir: &str,
     ) -> Result<String, TemplateError> {
-        let page = std::fs::read_to_string(page_path)?;
-        let layout = std::fs::read_to_string(layout_path)?;
+        let template = self.prepare_layout(page_path, layout_path, partials_dir)?;
 
-        let combined = layout.replace("{{{conteudo}}}", &page);
-        let expanded = expand_partials(&combined, partials_dir)?;
-
-        self.render_strict(&expanded)
+        self.render_strict(&template)
     }
 }
 
@@ -579,6 +578,10 @@ fn validate_template_syntax(template: &str) -> Result<(), TemplateError> {
         } else if expression.starts_with('#') || expression.starts_with('/') {
             return Err(TemplateError::Syntax(format!(
                 "Unsupported template block expression: '{expression}'."
+            )));
+        } else if !TemplateContext::is_valid_variable_name(expression) {
+            return Err(TemplateError::Syntax(format!(
+                "Invalid template variable name: '{expression}'."
             )));
         }
 
@@ -927,13 +930,9 @@ mod tests {
                 return;
             }
         }
-        std::os::windows::fs::symlink_file(&outside, &link).expect(
-            "Não foi possível criar a ligação simbólica; execute o teste com permissões adequadas",
-        );
 
         #[cfg(unix)]
         std::os::unix::fs::symlink(&outside, &link).unwrap();
-
         let result = expand_partials("{{> externo}}", partials.to_str().unwrap());
 
         fs::remove_dir_all(&base).unwrap();
@@ -1390,9 +1389,32 @@ mod tests {
     }
 
     #[test]
+    fn validation_rejects_invalid_variable_expression() {
+        let result = TemplateContext::validate_template("Olá, {{nome-completo}}!");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
     fn validation_rejects_malformed_else_expression() {
         let result =
             TemplateContext::validate_template("{{#if ativo}}Olá{{else nome}}Mundo{{/if}}");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
+    fn validation_rejects_invalid_variable_inside_if() {
+        let result =
+            TemplateContext::validate_template("{{#if utilizador}}Olá, {{nome-completo}}!{{/if}}");
+
+        assert!(matches!(result, Err(TemplateError::Syntax(_))));
+    }
+
+    #[test]
+    fn validation_rejects_invalid_variable_inside_each() {
+        let result =
+            TemplateContext::validate_template("{{#each alunos}}{{nome-completo}}{{/each}}");
 
         assert!(matches!(result, Err(TemplateError::Syntax(_))));
     }

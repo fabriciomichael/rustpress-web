@@ -78,13 +78,14 @@ fn request_dynamic_route_with_method(method: &str, path: &str) -> String {
     let mut app = App::new();
 
     app.get("/dinamico", |_req: Request, res: Response| {
-        res.header("Content-Type", "text/plain; charset=utf-8")
-            .send("Conteúdo dinâmico para GET e HEAD")
+        Ok(res
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .send("Conteúdo dinâmico para GET e HEAD"))
     })
     .expect("Não foi possível registar a rota dinâmica");
 
     app.post("/dinamico", |_req: Request, res: Response| {
-        res.send("Recurso criado")
+        Ok(res.send("Recurso criado"))
     })
     .expect("Não foi possível registar a rota POST");
 
@@ -97,7 +98,7 @@ fn request_middleware_response() -> String {
     app.use_middleware(|_| None);
 
     app.get("/middleware-teste", |_req: Request, res: Response| {
-        res.send("Handler executado")
+        Ok(res.send("Handler executado"))
     })
     .expect("Não foi possível registar a rota de teste");
 
@@ -110,7 +111,7 @@ fn request_middleware_short_circuit() -> String {
     app.use_middleware(|_| Some(Response::new().status(401).send("Acesso negado")));
 
     app.get("/middleware-teste", |_req: Request, res: Response| {
-        res.send("Handler executado")
+        Ok(res.send("Handler executado"))
     })
     .expect("Não foi possível registar a rota de teste");
 
