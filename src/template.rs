@@ -815,7 +815,20 @@ mod tests {
 
     #[test]
     fn rejects_invalid_partial_names() {
-        let result = expand_partials("{{> ../secret}}", "views/partials");
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        let dir = std::env::temp_dir().join(format!("rustpress-invalid-partial-{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+
+        let result = expand_partials("{{> ../secret}}", dir.to_str().unwrap());
+
+        fs::remove_dir_all(&dir).unwrap();
 
         assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
     }

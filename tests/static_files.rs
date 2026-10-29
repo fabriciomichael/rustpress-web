@@ -1,8 +1,9 @@
 use std::{
+    fs,
     io::{Read, Write},
     net::TcpStream,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use rustpress::{App, HandlerError, Request, Response};
@@ -67,11 +68,41 @@ fn request_static_file(path: &str) -> String {
 }
 
 fn request_static_file_with_method(method: &str, path: &str) -> String {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("O relógio do sistema está incorrecto")
+        .as_nanos();
+
+    let directory = std::env::temp_dir().join(format!("rustpress-static-files-{unique}"));
+
+    fs::create_dir_all(directory.join("css")).expect("Não foi possível criar a pasta temporária");
+
+    fs::write(
+        directory.join("teste.txt"),
+        "RustPress: ficheiro estatico acessivel.",
+    )
+    .expect("Não foi possível criar o ficheiro de texto");
+
+    fs::write(
+        directory.join("css").join("style.css"),
+        "body { margin: 0; }",
+    )
+    .expect("Não foi possível criar o ficheiro CSS");
+
+    fs::write(
+        directory.join("teste.js"),
+        "console.log(\"RustPress está a servir JavaScript!\");",
+    )
+    .expect("Não foi possível criar o ficheiro JavaScript");
+
     let mut app = App::new();
+    app.static_files("/assets", &directory);
 
-    app.static_files("/assets", "public");
+    let response = request_with_app(app, method, path);
 
-    request_with_app(app, method, path)
+    fs::remove_dir_all(&directory).expect("Não foi possível remover a pasta temporária");
+
+    response
 }
 
 fn request_dynamic_route_with_method(method: &str, path: &str) -> String {
@@ -162,10 +193,8 @@ fn returns_404_for_missing_static_file() {
     let response = request_static_file("/assets/ficheiro-inexistente.txt");
 
     assert!(response.contains("404 Not Found"), "{response}");
-    assert!(
-        response.contains("404 - Página não encontrada"),
-        "{response}"
-    );
+
+    assert!(response.contains("Erro HTTP 404"), "{response}");
 }
 
 #[test]
@@ -250,16 +279,19 @@ fn returns_404_for_missing_nested_static_file() {
     );
 
     assert!(
+        response.contains("Erro HTTP 404"),
+        "Era esperada a mensagem de erro 404:\n{response}"
+    );
+
+    assert!(
         !response.contains("name = \"rustpress\""),
-        "O conteúdo do Cargo.toml não deve ser exposto:\n{response}"
+        "A resposta não deve expor informações internas:\n{response}"
     );
 }
 
 #[test]
 fn head_returns_headers_without_file_body() {
-    let expected_length = std::fs::metadata("public/teste.txt")
-        .expect("Não foi possível obter os metadados de teste.txt")
-        .len();
+    let expected_length = "RustPress: ficheiro estatico acessivel.".len() as u64;
     let response = request_static_file_with_method("HEAD", "/assets/teste.txt");
 
     assert!(
