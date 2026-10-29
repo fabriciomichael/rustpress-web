@@ -479,3 +479,63 @@ fn global_error_handler_customizes_response_using_request_context() {
         "A resposta revelou detalhes internos: {response}"
     );
 }
+
+#[test]
+fn global_error_handler_customizes_not_found_response() {
+    let mut app = App::new();
+
+    app.set_error_handler(|error, context| {
+        Response::new().status(error.status()).send(format!(
+            "Erro HTTP {} no caminho {}",
+            error.status(),
+            context.path()
+        ))
+    });
+
+    let response = request_with_app(app, "GET", "/rota-inexistente");
+
+    assert!(
+        response.contains("404 Not Found"),
+        "Código HTTP inesperado: {response}"
+    );
+
+    assert!(
+        response.contains("Erro HTTP 404 no caminho /rota-inexistente"),
+        "A resposta personalizada não foi encontrada: {response}"
+    );
+}
+
+#[test]
+fn global_error_handler_customizes_method_not_allowed_response() {
+    let mut app = App::new();
+
+    app.get("/recurso", |_req, _res| {
+        Ok(Response::new().send("Recurso disponível"))
+    })
+    .expect("Erro ao registar a rota");
+
+    app.set_error_handler(|error, context| {
+        Response::new().status(error.status()).send(format!(
+            "Método {} não permitido em {}",
+            context.method(),
+            context.path()
+        ))
+    });
+
+    let response = request_with_app(app, "POST", "/recurso");
+
+    assert!(
+        response.contains("405 Method Not Allowed"),
+        "Código HTTP inesperado: {response}"
+    );
+
+    assert!(
+        response.contains("Método POST não permitido em /recurso"),
+        "A resposta personalizada não foi encontrada: {response}"
+    );
+
+    assert!(
+        response.to_ascii_lowercase().contains("allow: get"),
+        "O cabeçalho Allow não foi preservado: {response}"
+    );
+}

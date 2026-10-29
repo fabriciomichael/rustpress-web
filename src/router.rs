@@ -273,10 +273,12 @@ impl Router {
             }
         }
 
+        let context = request.context();
+
         let mut response = match matched {
             Some((handler, _)) => {
                 // Guardamos os metadados antes de mover Request para o handler.
-                let context = request.context();
+                //let context = request.context();
 
                 match handler(request, Response::new()) {
                     Ok(response) => response.into_hyper(),
@@ -299,12 +301,23 @@ impl Router {
                     .collect::<Vec<_>>()
                     .join(", ");
 
-                self.error_response(405)
-                    .header("Allow", &allow)
-                    .into_hyper()
-            }
+                let error = HandlerError::with_status(405, "Método não permitido");
 
-            None => self.error_response(404).into_hyper(),
+                let response = match &self.error_handler {
+                    Some(error_handler) => error_handler(&error, &context).header("Allow", &allow),
+                    None => self.error_response(405).header("Allow", &allow),
+                };
+
+                response.into_hyper()
+            }
+            None => {
+                let error = HandlerError::with_status(404, "Rota não encontrada");
+
+                match &self.error_handler {
+                    Some(error_handler) => error_handler(&error, &context).into_hyper(),
+                    None => self.error_response(404).into_hyper(),
+                }
+            }
         };
 
         if method == Method::HEAD {
