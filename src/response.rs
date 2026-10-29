@@ -52,6 +52,24 @@ impl Response {
         Self::new().status(code).send(message)
     }
 
+    /// Cria uma resposta HTTP de erro no formato JSON.
+    pub fn json_error(code: u16, message: impl Into<String>) -> Self {
+        let status = if (400..=599).contains(&code) {
+            code
+        } else {
+            500
+        };
+
+        let body = serde_json::json!({
+            "error": {
+                "status": status,
+                "message": message.into()
+            }
+        });
+
+        Self::new().status(status).json(body.to_string())
+    }
+
     /// Define o corpo da resposta como texto simples.
     pub fn send(mut self, body: impl Into<String>) -> Self {
         self.body = Bytes::from(body.into());
@@ -812,5 +830,45 @@ mod tests {
         let hyper_response = response.into_hyper();
 
         assert_eq!(hyper_response.headers().get(CONTENT_LENGTH).unwrap(), "5");
+    }
+
+    #[test]
+    fn json_error_returns_status_message_and_json_content_type() {
+        let response = Response::json_error(404, "Rota não encontrada");
+
+        assert_eq!(response.status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.content_type,
+            HeaderValue::from_static("application/json; charset=utf-8")
+        );
+
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.body).expect("O corpo deve ser JSON válido");
+
+        assert_eq!(body["error"]["status"], 404);
+        assert_eq!(body["error"]["message"], "Rota não encontrada");
+    }
+
+    #[test]
+    fn json_error_escapes_special_characters() {
+        let message = "Erro com \"aspas\" e \\ barra";
+        let response = Response::json_error(400, message);
+
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.body).expect("O corpo deve ser JSON válido");
+
+        assert_eq!(body["error"]["message"], message);
+    }
+
+    #[test]
+    fn json_error_uses_500_for_non_error_status_codes() {
+        let response = Response::json_error(200, "Erro interno");
+
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.body).expect("O corpo deve ser JSON válido");
+
+        assert_eq!(body["error"]["status"], 500);
     }
 }
