@@ -1,1 +1,0 @@
-RustPress: ficheiro estatico acessivel.

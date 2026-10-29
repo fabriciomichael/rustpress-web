@@ -1,1 +1,0 @@
-Ficheiro dentro de public/assets.
