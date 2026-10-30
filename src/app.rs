@@ -78,6 +78,13 @@ impl App {
         server::listen(address, self.router, self.logger).await
     }
 
+    /// Inicia a aplicação usando um listener TCP previamente criado.
+    ///
+    /// Este método permite configurar o socket antes de o entregar ao
+    /// RustPress. O listener é consumido pela aplicação.
+    ///
+    /// # Errors
+    /// Devolve um erro se o servidor não conseguir aceitar ligações.
     pub async fn serve_listener(
         self,
         listener: tokio::net::TcpListener,
