@@ -28,6 +28,7 @@ pub enum Level {
     Debug = 0,
     /// Eventos informativos normais da aplicação.
     Info = 1,
+    /// Situações inesperadas que não interrompem necessariamente a aplicação.
     Warn = 2,
     Error = 3,
 }
