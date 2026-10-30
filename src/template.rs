@@ -38,6 +38,7 @@ pub enum TemplateError {
     Syntax(String),
     /// O template excedeu o limite de blocos aninhados permitido.
     NestingLimitExceeded,
+    /// Ocorreu uma falha ao ler uma página, layout ou partial do disco.
     Io(std::io::Error),
 }
 
