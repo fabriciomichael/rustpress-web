@@ -1,3 +1,9 @@
+//! Correspondência de rotas e despacho de pedidos.
+//!
+//! O router é um componente interno: armazena handlers por método e padrão
+//! de caminho, extrai parâmetros dinâmicos, executa middlewares e encaminha
+//! erros para o handler global configurado em [`crate::App`].
+
 use std::{collections::HashMap, sync::Arc};
 
 use http_body_util::Full;
