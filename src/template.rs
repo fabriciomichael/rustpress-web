@@ -1,3 +1,26 @@
+//! Motor de templates HTML do RustPress.
+//!
+//! [`TemplateContext`] armazena valores JSON e aplica-os a templates com
+//! variáveis, condições, ciclos, layouts e partials. A interpolação escapa
+//! valores para HTML; a renderização estrita devolve [`TemplateError`] quando
+//! encontra variáveis indefinidas ou sintaxe inválida.
+//!
+//! # Exemplo
+//!
+//! ```
+//! use rustpress::TemplateContext;
+//! use serde_json::json;
+//! let mut context = TemplateContext::new();
+//! context.set("titulo", json!("Catálogo"));
+//! context.set("mostrar", json!(true));
+//! context.set("produtos", json!([{ "nome": "Teclado" }, { "nome": "Rato" }]));
+//! let html = context.render("<h1>{{titulo}}</h1>{{#if mostrar}}{{#each produtos}}<p>{{nome}}</p>{{/each}}{{/if}}");
+//! assert!(html.contains("Teclado"));
+//! ```
+//!
+//! Os caminhos de páginas, layouts e partials são caminhos do sistema de
+//! ficheiros, relativos ao directório de trabalho actual.
+
 use serde_json::{Map, Value};
 use std::fmt;
 
@@ -47,7 +70,7 @@ impl From<std::io::Error> for TemplateError {
     }
 }
 
-/// Contexto de dados disponibilizado ao template.
+/// Contexto de dados disponibilizado ao template.\n/// Armazena valores JSON para interpolação, condições e ciclos.
 #[derive(Debug, Clone, Default)]
 pub struct TemplateContext {
     data: Map<String, Value>,
