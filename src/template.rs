@@ -26,6 +26,10 @@ use std::fmt;
 
 const MAX_TEMPLATE_DEPTH: usize = 20;
 
+/// Erros de validação e renderização de templates.
+///
+/// Inclui variáveis indefinidas, sintaxe inválida, profundidade excessiva e
+/// falhas de leitura de ficheiros.
 #[derive(Debug)]
 pub enum TemplateError {
     UndefinedVariable(String),
@@ -70,7 +74,10 @@ impl From<std::io::Error> for TemplateError {
     }
 }
 
-/// Contexto de dados disponibilizado ao template.\n/// Armazena valores JSON para interpolação, condições e ciclos.
+/// Contexto de dados disponibilizado ao template.
+///
+/// Armazena valores JSON para interpolação, condições e ciclos.
+/// Armazena valores JSON para interpolação, condições e ciclos.
 #[derive(Debug, Clone, Default)]
 pub struct TemplateContext {
     data: Map<String, Value>,
