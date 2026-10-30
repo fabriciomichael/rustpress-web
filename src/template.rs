@@ -32,6 +32,7 @@ const MAX_TEMPLATE_DEPTH: usize = 20;
 /// falhas de leitura de ficheiros.
 #[derive(Debug)]
 pub enum TemplateError {
+    /// Uma variável referenciada não existe no contexto.
     UndefinedVariable(String),
     Syntax(String),
     NestingLimitExceeded,
@@ -76,7 +77,6 @@ impl From<std::io::Error> for TemplateError {
 
 /// Contexto de dados disponibilizado ao template.
 ///
-/// Armazena valores JSON para interpolação, condições e ciclos.
 /// Armazena valores JSON para interpolação, condições e ciclos.
 #[derive(Debug, Clone, Default)]
 pub struct TemplateContext {
