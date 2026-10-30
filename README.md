@@ -494,6 +494,35 @@ O middleware serve pedidos GET e HEAD, determina o tipo MIME por extensão e rej
 6. Erros encaminhados são tratados pelo handler global, quando configurado.
 7. A resposta RustPress é convertida para a resposta Hyper e enviada ao cliente.
 
+## Documentação da API (rustdoc)
+
+A API pública é documentada directamente nos módulos e tipos de `src/` através de comentários Rustdoc (`///` e `//!`). A documentação inclui descrições, exemplos executáveis e notas sobre limitações conhecidas.
+
+Gerar a documentação HTML localmente:
+
+```bash
+cargo doc --no-deps --open
+```
+
+Executar também os exemplos incluídos nos comentários da documentação:
+
+```bash
+cargo test --doc
+```
+
+Verificar a documentação e os exemplos antes de preparar uma publicação:
+
+```bash
+cargo fmt --check
+cargo check
+cargo test
+cargo test --doc
+cargo package --list
+cargo package
+```
+
+O atributo `#![warn(missing_docs)]` está activo na crate para sinalizar itens públicos sem documentação. Antes da publicação, corrija todos os avisos e confirme que os exemplos de rustdoc compilam.
+
 ## Testes
 
 Execute a suite completa:
