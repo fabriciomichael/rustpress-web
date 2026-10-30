@@ -1,3 +1,8 @@
+//! Abstracções de leitura dos pedidos HTTP.
+//!
+//! [`Request`] fornece acesso ao método, caminho, cabeçalhos, parâmetros de
+//! rota e query string. O corpo HTTP ainda não é exposto pela API pública.
+
 use hyper::{body::Incoming, header::HeaderValue, http::Method};
 
 /// Representa uma requisição HTTP recebida pelo servidor.
