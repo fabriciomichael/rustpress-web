@@ -1,3 +1,11 @@
+//! Configuração de aplicações RustPress.
+//!
+//! [`App`] é a fachada usada para registar rotas, middlewares, ficheiros
+//! estáticos, handlers de erro e iniciar o servidor.
+//!
+//! Os caminhos de ficheiros são interpretados relativamente ao directório
+//! de trabalho do processo.
+
 use hyper::http::Method;
 
 use crate::{
