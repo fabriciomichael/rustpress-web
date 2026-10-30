@@ -1,3 +1,9 @@
+//! Integração do router com Hyper e Tokio.
+//!
+//! Este módulo interno abre ou recebe um listener TCP, aceita ligações e
+//! encaminha pedidos HTTP para o router. Cada ligação é processada de forma
+//! assíncrona.
+
 use crate::logger::Logger;
 use std::{convert::Infallible, error::Error, time::Instant};
 
