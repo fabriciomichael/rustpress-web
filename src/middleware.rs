@@ -1,3 +1,9 @@
+//! Tipos de controlo para middleware.
+//!
+//! [`MiddlewareResult`] permite que um middleware avançado continue a cadeia,
+//! interrompa o pedido com uma resposta ou encaminhe um erro para o handler
+//! central da aplicação.
+
 use crate::{HandlerError, Response};
 
 /// Resultado devolvido por um middleware avançado.
