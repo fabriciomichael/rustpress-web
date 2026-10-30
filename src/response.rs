@@ -1,3 +1,16 @@
+//! Construção de respostas HTTP.
+//!
+//! [`Response`] mantém o estado, os cabeçalhos e o corpo até ser convertido
+//! para uma resposta Hyper. Os métodos de construção consomem e devolvem
+//! `Self`, permitindo encadear chamadas.
+//!
+//! # Exemplo
+//!
+//! ```
+//! use rustpress::Response;
+//! let response = Response::new().status(201).header("X-Application", "RustPress").json(r#"{"created":true}"#);
+//! ```
+
 use std::{fs, path::Path};
 
 use http_body_util::Full;
