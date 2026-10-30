@@ -1,3 +1,18 @@
+//! Registo de eventos e diagnóstico do RustPress.
+//!
+//! O módulo fornece [`Logger`] e [`Level`]. É possível configurar o nível
+//! mínimo de uma instância independente ou o logger interno de [`crate::App`].
+//!
+//! # Exemplo
+//!
+//! ```
+//! use rustpress::{Level, Logger};
+//! let logger = Logger::new();
+//! logger.set_level(Level::Debug);
+//! logger.info("Servidor preparado");
+//! logger.warn("Configuração opcional ausente");
+//! ```
+
 use std::sync::{
     Arc,
     atomic::{AtomicU8, Ordering},
@@ -6,7 +21,7 @@ use std::sync::{
 /// Níveis de registo disponíveis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
-pub enum Level {
+/// Nível de severidade de uma mensagem de log.\n/// O nível configurado funciona como limite mínimo.\npub enum Level {
     Debug = 0,
     Info = 1,
     Warn = 2,
@@ -15,7 +30,7 @@ pub enum Level {
 
 /// Logger independente para cada aplicação RustPress.
 #[derive(Debug, Clone)]
-pub struct Logger {
+/// Logger leve com configuração partilhada entre clones.\n/// Cada chamada a `Logger::new` cria uma configuração independente.\npub struct Logger {
     min_level: Arc<AtomicU8>,
 }
 
