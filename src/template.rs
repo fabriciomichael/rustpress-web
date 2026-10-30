@@ -34,6 +34,7 @@ const MAX_TEMPLATE_DEPTH: usize = 20;
 pub enum TemplateError {
     /// Uma variável referenciada não existe no contexto.
     UndefinedVariable(String),
+    /// A expressão ou estrutura de blocos do template é inválida.
     Syntax(String),
     NestingLimitExceeded,
     Io(std::io::Error),
