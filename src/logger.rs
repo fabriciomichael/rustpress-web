@@ -30,6 +30,7 @@ pub enum Level {
     Info = 1,
     /// Situações inesperadas que não interrompem necessariamente a aplicação.
     Warn = 2,
+    /// Falhas que exigem atenção ou tratamento.
     Error = 3,
 }
 
