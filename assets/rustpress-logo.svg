@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="190" viewBox="0 0 760 190" role="img" aria-labelledby="title desc">
+  <title id="title">RustPress</title>
+  <desc id="desc">RustPress — lightweight HTTP framework for Rust</desc>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f97316"/>
+      <stop offset="1" stop-color="#dc2626"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="174" height="174" rx="34" fill="#171717"/>
+  <path d="M52 48h57c25 0 40 13 40 34 0 16-9 27-24 32l28 31h-37l-23-27H83v27H52V48zm31 27v19h24c8 0 12-3 12-10s-4-9-12-9H83z" fill="url(#g)"/>
+  <path d="M47 37h87" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".85"/>
+  <text x="215" y="112" fill="#171717" font-family="Arial,Helvetica,sans-serif" font-size="76" font-weight="700" letter-spacing="-3">Rust<tspan fill="#ea580c">Press</tspan></text>
+  <text x="220" y="148" fill="#737373" font-family="Arial,Helvetica,sans-serif" font-size="19" letter-spacing="2">HTTP FRAMEWORK FOR RUST</text>
+</svg>
