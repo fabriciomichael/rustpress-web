@@ -18,19 +18,24 @@ use std::sync::{
     atomic::{AtomicU8, Ordering},
 };
 
-/// Níveis de registo disponíveis.
+/// Nível de severidade de uma mensagem de log.
+///
+/// O nível configurado funciona como limite mínimo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
-/// Nível de severidade de uma mensagem de log.\n/// O nível configurado funciona como limite mínimo.\npub enum Level {
+pub enum Level {
     Debug = 0,
     Info = 1,
     Warn = 2,
     Error = 3,
 }
 
-/// Logger independente para cada aplicação RustPress.
+/// Logger leve para diagnóstico de aplicações RustPress.
+///
+/// Clones partilham o nível de registo da instância original; cada chamada a
+/// [`Logger::new`] cria uma configuração independente.
 #[derive(Debug, Clone)]
-/// Logger leve com configuração partilhada entre clones.\n/// Cada chamada a `Logger::new` cria uma configuração independente.\npub struct Logger {
+pub struct Logger {
     min_level: Arc<AtomicU8>,
 }
 
