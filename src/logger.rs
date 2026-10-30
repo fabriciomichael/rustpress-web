@@ -26,6 +26,7 @@ use std::sync::{
 pub enum Level {
     /// Mensagens detalhadas para diagnóstico durante o desenvolvimento.
     Debug = 0,
+    /// Eventos informativos normais da aplicação.
     Info = 1,
     Warn = 2,
     Error = 3,
