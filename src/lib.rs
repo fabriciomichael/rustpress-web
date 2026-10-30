@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! # RustPress
 //!
 //! RustPress é um framework HTTP assíncrono e minimalista para Rust, construído sobre Hyper e Tokio.
