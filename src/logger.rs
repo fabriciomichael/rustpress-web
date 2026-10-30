@@ -24,6 +24,7 @@ use std::sync::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum Level {
+    /// Mensagens detalhadas para diagnóstico durante o desenvolvimento.
     Debug = 0,
     Info = 1,
     Warn = 2,
