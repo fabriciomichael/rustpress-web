@@ -36,6 +36,7 @@ pub enum TemplateError {
     UndefinedVariable(String),
     /// A expressão ou estrutura de blocos do template é inválida.
     Syntax(String),
+    /// O template excedeu o limite de blocos aninhados permitido.
     NestingLimitExceeded,
     Io(std::io::Error),
 }
