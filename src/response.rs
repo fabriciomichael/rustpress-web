@@ -22,6 +22,7 @@ use hyper::{
 };
 
 use crate::TemplateContext;
+use crate::session::{Cookie, CookieError, SessionConfig};
 
 /// Representa uma resposta HTTP que será enviada ao cliente pelo servidor.
 ///
@@ -254,6 +255,31 @@ impl Response {
         self.content_length = Some(length);
         self
     }
+
+    /// Adiciona um cookie à resposta HTTP.
+    ///
+    /// Permite adicionar vários cookies à mesma resposta.
+    pub fn cookie(&mut self, cookie: &Cookie, config: &SessionConfig) -> Result<(), CookieError> {
+        let value = cookie.to_set_cookie(config)?;
+
+        let header_value = HeaderValue::from_str(&value).map_err(|_| CookieError::InvalidValue)?;
+
+        self.headers.append(hyper::header::SET_COOKIE, header_value);
+
+        Ok(())
+    }
+
+    /// Remove um cookie do cliente através de um cabeçalho Set-Cookie.
+    ///
+    /// O cookie é removido definindo Max-Age=0.
+    pub fn remove_cookie(&mut self, name: &str, config: &SessionConfig) -> Result<(), CookieError> {
+        let cookie = Cookie::new(name, "");
+
+        let mut removal_config = config.clone();
+        removal_config.max_age = 0;
+
+        self.cookie(&cookie, &removal_config)
+    }
 }
 
 impl Default for Response {
@@ -265,6 +291,8 @@ impl Default for Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::{Cookie, SessionConfig};
+    use hyper::header::SET_COOKIE;
 
     #[test]
     fn creates_error_response_with_status_and_message() {
@@ -882,5 +910,117 @@ mod tests {
             serde_json::from_slice(&response.body).expect("O corpo deve ser JSON válido");
 
         assert_eq!(body["error"]["status"], 500);
+    }
+
+    #[test]
+    fn response_sets_cookie_header() {
+        let cookie = Cookie::new("session_id", "abc123");
+        let config = SessionConfig::default();
+
+        let mut response = Response::new();
+
+        response.cookie(&cookie, &config).unwrap();
+
+        let hyper_response = response.into_hyper();
+
+        let set_cookie = hyper_response
+            .headers()
+            .get(SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        assert!(set_cookie.contains("session_id=abc123"));
+        assert!(set_cookie.contains("HttpOnly"));
+        assert!(set_cookie.contains("SameSite=Lax"));
+    }
+
+    #[test]
+    fn response_preserves_multiple_cookies() {
+        let config = SessionConfig::default();
+
+        let first = Cookie::new("session_id", "abc123");
+        let second = Cookie::new("theme", "dark");
+
+        let mut response = Response::new();
+
+        response.cookie(&first, &config).unwrap();
+        response.cookie(&second, &config).unwrap();
+
+        let hyper_response = response.into_hyper();
+        let cookies = hyper_response.headers().get_all(SET_COOKIE);
+
+        assert_eq!(cookies.iter().count(), 2);
+
+        let values: Vec<&str> = cookies
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect();
+
+        assert!(values.iter().any(|value| value.starts_with("session_id=")));
+        assert!(values.iter().any(|value| value.starts_with("theme=")));
+    }
+
+    #[test]
+    fn response_removes_cookie_with_zero_max_age() {
+        let config = SessionConfig::default();
+
+        let mut response = Response::new();
+
+        response.remove_cookie("session_id", &config).unwrap();
+
+        let hyper_response = response.into_hyper();
+
+        let set_cookie = hyper_response
+            .headers()
+            .get(SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        assert!(set_cookie.contains("session_id="));
+        assert!(set_cookie.contains("Max-Age=0"));
+    }
+
+    #[test]
+    fn cookie_error_does_not_modify_response() {
+        let mut config = SessionConfig::default();
+        config.path.clear();
+
+        let mut response = Response::new().status(403).send("Acesso negado");
+
+        response = response.header("X-Test", "preserved");
+
+        let cookie = Cookie::new("session_id", "abc123");
+
+        let result = response.cookie(&cookie, &config);
+
+        assert!(result.is_err());
+
+        let hyper_response = response.into_hyper();
+
+        assert_eq!(hyper_response.status(), StatusCode::FORBIDDEN);
+
+        assert_eq!(hyper_response.headers().get("X-Test").unwrap(), "preserved");
+    }
+
+    #[test]
+    fn remove_cookie_error_does_not_modify_response() {
+        let mut config = SessionConfig::default();
+        config.path.clear();
+
+        let mut response = Response::new().status(401).send("Sessão inválida");
+
+        response = response.header("X-Test", "preserved");
+
+        let result = response.remove_cookie("session_id", &config);
+
+        assert!(result.is_err());
+
+        let hyper_response = response.into_hyper();
+
+        assert_eq!(hyper_response.status(), StatusCode::UNAUTHORIZED);
+
+        assert_eq!(hyper_response.headers().get("X-Test").unwrap(), "preserved");
     }
 }

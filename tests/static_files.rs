@@ -195,7 +195,10 @@ fn returns_404_for_missing_static_file() {
     assert!(response.contains("404 Not Found"), "{response}");
     assert!(response.contains("Página não encontrada"), "{response}");
     assert!(response.contains("Voltar à página inicial"), "{response}");
-    assert!(response.contains("Desenvolvido com RustPress"), "{response}");
+    assert!(
+        response.contains("Desenvolvido com RustPress"),
+        "{response}"
+    );
 }
 
 #[test]

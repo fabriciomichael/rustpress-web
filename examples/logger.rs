@@ -1,4 +1,3 @@
-
 use rustpress::{App, Level, Logger};
 
 fn main() {

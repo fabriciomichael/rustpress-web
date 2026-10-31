@@ -15,6 +15,7 @@ use crate::{
     response::Response,
     router::Router,
     server,
+    session::SessionConfig,
 };
 
 use std::{
@@ -42,6 +43,14 @@ impl App {
             router: Router::new(),
             logger: Logger::new(),
         }
+    }
+
+    /// Activa a gestão de sessões HTTP na aplicação.
+    ///
+    /// As sessões são armazenadas em memória e utilizam a configuração
+    /// fornecida para gerir os cookies de sessão.
+    pub fn use_sessions(&mut self, config: SessionConfig) {
+        self.router.enable_sessions(config);
     }
 
     /// Define o nível mínimo de registo da aplicação.

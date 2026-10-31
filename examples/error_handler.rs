@@ -1,4 +1,3 @@
-
 use rustpress::{App, HandlerError, Request, Response};
 
 #[tokio::main]
@@ -15,12 +14,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             error
         );
 
-        Response::new()
-            .status(error.status())
-            .html(format!(
-                "<h1>Erro {}</h1><p>Ocorreu um problema ao processar o pedido.</p>",
-                error.status()
-            ))
+        Response::new().status(error.status()).html(format!(
+            "<h1>Erro {}</h1><p>Ocorreu um problema ao processar o pedido.</p>",
+            error.status()
+        ))
     });
 
     // Rota de teste que provoca intencionalmente um erro 500.

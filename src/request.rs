@@ -5,6 +5,10 @@
 
 use hyper::{body::Incoming, header::HeaderValue, http::Method};
 
+use std::sync::{Arc, Mutex};
+
+use crate::session::{Session, SessionManager};
+
 /// Representa uma requisição HTTP recebida pelo servidor.
 ///
 /// Esta estrutura encapsula a mensagem original do Hyper e acrescenta
@@ -14,13 +18,58 @@ use hyper::{body::Incoming, header::HeaderValue, http::Method};
 pub struct Request {
     inner: hyper::Request<Incoming>,
     params: Vec<(String, String)>,
+    session: Option<Arc<Mutex<Session>>>,
+    session_manager: Option<Arc<SessionManager>>,
 }
 
 impl Request {
     /// Cria uma nova instância de `Request` com a requisição HTTP original e os
     /// parâmetros de rota já resolvidos.
     pub(crate) fn new(inner: hyper::Request<Incoming>, params: Vec<(String, String)>) -> Self {
-        Self { inner, params }
+        Self {
+            inner,
+            params,
+            session: None,
+            session_manager: None,
+        }
+    }
+
+    /// Devolve a sessão associada à requisição.
+    ///
+    /// Retorna `None` quando a gestão de sessões não está activada.
+    pub fn session(&self) -> Option<Arc<Mutex<Session>>> {
+        self.session.clone()
+    }
+
+    /// Associa uma sessão ao pedido HTTP.
+    pub(crate) fn set_session(&mut self, session: Arc<Mutex<Session>>) {
+        self.session = Some(session);
+    }
+
+    /// Associa o gestor de sessões ao pedido HTTP.
+    pub(crate) fn set_session_manager(&mut self, manager: Arc<SessionManager>) {
+        self.session_manager = Some(manager);
+    }
+
+    /// Regenera o identificador da sessão actual.
+    ///
+    /// Mantém os dados existentes, mas substitui o identificador
+    /// por um novo UUID.
+    ///
+    /// Retorna `false` se as sessões não estiverem activadas
+    /// ou se não for possível bloquear a sessão.
+    pub fn regenerate_session(&self) -> bool {
+        let (Some(session), Some(manager)) = (&self.session, &self.session_manager) else {
+            return false;
+        };
+
+        let Ok(mut session) = session.lock() else {
+            return false;
+        };
+
+        manager.regenerate(&mut session);
+
+        true
     }
 
     /// Devolve o método HTTP utilizado na requisição, como `GET`, `POST`,

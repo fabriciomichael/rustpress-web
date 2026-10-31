@@ -3,15 +3,21 @@
 //! O router é um componente interno: armazena handlers por método e padrão
 //! de caminho, extrai parâmetros dinâmicos, executa middlewares e encaminha
 //! erros para o handler global configurado em [`crate::App`].
-
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request as HyperRequest, Response as HyperResponse, body::Incoming, http::Method};
 
 use crate::{
-    HandlerError, MiddlewareResult, TemplateContext, request::Request, response::Response,
+    HandlerError, MiddlewareResult, TemplateContext,
+    request::Request,
+    response::Response,
+    session::{Cookie, MemoryStore, SessionConfig, SessionManager},
 };
 
 /// Tipo que representa um handler de rota.
@@ -39,12 +45,24 @@ pub(crate) struct Router {
     routes: HashMap<RouteKey, Handler>,
     middlewares: Vec<Middleware>,
     error_handler: Option<ErrorHandler>,
+
+    session_manager: Option<Arc<SessionManager>>,
+    session_config: Option<SessionConfig>,
 }
 
 impl Router {
     /// Cria um router vazio.
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// Activa a gestão de sessões no router.
+    pub(crate) fn enable_sessions(&mut self, config: SessionConfig) {
+        let manager =
+            SessionManager::with_ttl(MemoryStore::new(), Duration::from_secs(config.max_age));
+
+        self.session_manager = Some(Arc::new(manager));
+        self.session_config = Some(config);
     }
 
     /// Regista uma nova rota no router.
@@ -258,7 +276,17 @@ impl Router {
             None => Vec::new(),
         };
 
-        let request = Request::new(request, params);
+        let session = self.load_session(&request);
+
+        let mut request = Request::new(request, params);
+
+        if let Some(session) = session {
+            request.set_session(session);
+        }
+
+        if let Some(manager) = self.session_manager.clone() {
+            request.set_session_manager(manager);
+        }
 
         let context = request.context();
 
@@ -267,7 +295,7 @@ impl Router {
                 MiddlewareResult::Next => {}
 
                 MiddlewareResult::Respond(response) => {
-                    let mut response = response.into_hyper();
+                    let mut response = self.finalize_response(response, request.session());
 
                     if method == Method::HEAD {
                         *response.body_mut() = Full::new(Bytes::new());
@@ -277,10 +305,12 @@ impl Router {
                 }
 
                 MiddlewareResult::Error(error) => {
-                    let mut response = match &self.error_handler {
-                        Some(error_handler) => error_handler(&error, &context).into_hyper(),
-                        None => self.error_response(error.status()).into_hyper(),
+                    let response = match &self.error_handler {
+                        Some(error_handler) => error_handler(&error, &context),
+                        None => self.error_response(error.status()),
                     };
+
+                    let mut response = self.finalize_response(response, request.session());
 
                     if method == Method::HEAD {
                         *response.body_mut() = Full::new(Bytes::new());
@@ -295,19 +325,22 @@ impl Router {
 
         let mut response = match matched {
             Some((handler, _)) => {
-                // Guardamos os metadados antes de mover Request para o handler.
-                //let context = request.context();
+                // Guardamos a sessão antes de mover Request para o handler.
+                let session = request.session();
 
                 match handler(request, Response::new()) {
-                    Ok(response) => response.into_hyper(),
+                    Ok(response) => self.finalize_response(response, session),
+
                     Err(error) => {
-                        match &self.error_handler {
-                            Some(error_handler) => error_handler(&error, &context).into_hyper(),
+                        let response = match &self.error_handler {
+                            Some(error_handler) => error_handler(&error, &context),
                             None => {
                                 eprintln!("Erro no handler: {error}");
-                                self.error_response(error.status()).into_hyper()
+                                self.error_response(error.status())
                             }
-                        }
+                        };
+
+                        self.finalize_response(response, session)
                     }
                 }
             }
@@ -327,18 +360,20 @@ impl Router {
                     None => self.error_response(405).header("Allow", &allow),
                 };
 
-                response.into_hyper()
+                self.finalize_response(response, request.session())
             }
+
             None => {
                 let error = HandlerError::with_status(404, "Rota não encontrada");
 
-                match &self.error_handler {
-                    Some(error_handler) => error_handler(&error, &context).into_hyper(),
-                    None => self.error_response(404).into_hyper(),
-                }
+                let response = match &self.error_handler {
+                    Some(error_handler) => error_handler(&error, &context),
+                    None => self.error_response(404),
+                };
+
+                self.finalize_response(response, request.session())
             }
         };
-
         if method == Method::HEAD {
             *response.body_mut() = Full::new(Bytes::new());
         }
@@ -395,11 +430,75 @@ impl Router {
 
         Ok(())
     }
+
+    /// Recupera a sessão associada a um pedido HTTP.
+    fn load_session(
+        &self,
+        request: &HyperRequest<Incoming>,
+    ) -> Option<Arc<Mutex<crate::session::Session>>> {
+        let manager = self.session_manager.as_ref()?;
+        let config = self.session_config.as_ref()?;
+
+        let session = request
+            .headers()
+            .get(hyper::header::COOKIE)
+            .and_then(|header| header.to_str().ok())
+            .and_then(|header| Cookie::get(header, &config.cookie_name))
+            .map(|session_id| manager.load(&session_id))
+            .unwrap_or_else(|| manager.create());
+
+        Some(Arc::new(Mutex::new(session)))
+    }
+
+    /// Finaliza a resposta HTTP e persiste a sessão, quando necessário.
+
+    fn finalize_response(
+        &self,
+        mut response: Response,
+        session: Option<Arc<Mutex<crate::session::Session>>>,
+    ) -> HyperResponse<Full<Bytes>> {
+        let Some(session) = session else {
+            return response.into_hyper();
+        };
+
+        let (Ok(session), Some(manager), Some(config)) = (
+            session.lock(),
+            self.session_manager.as_ref(),
+            self.session_config.as_ref(),
+        ) else {
+            return response.into_hyper();
+        };
+
+        if session.is_destroyed() {
+            manager.destroy(session.id());
+
+            let _ = response.remove_cookie(&config.cookie_name, config);
+
+            return response.into_hyper();
+        }
+
+        if session.is_modified() {
+            manager.save(&session);
+
+            let cookie = Cookie::new(config.cookie_name.clone(), session.id().to_string());
+
+            let _ = response.cookie(&cookie, config);
+
+            return response.into_hyper();
+        }
+
+        response.into_hyper()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::SessionConfig;
+    use http::StatusCode;
+    use http_body_util::BodyExt;
+    use hyper::body::Body;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn matches_static_route() {
@@ -672,5 +771,62 @@ mod tests {
         // Neste módulo, podemos testar directamente o registo
         // do middleware, mas handle() exige uma requisição Hyper
         // com um corpo Incoming.
+    }
+
+    #[tokio::test]
+    async fn finalize_response_preserves_response_when_cookie_fails() {
+        let mut router = Router::new();
+
+        let mut config = SessionConfig::default();
+        config.path.clear();
+
+        router.enable_sessions(config);
+
+        let manager = router.session_manager.as_ref().unwrap();
+
+        let mut session = manager.create();
+        session.insert("user", "Fabrício").unwrap();
+
+        let session = Arc::new(Mutex::new(session));
+
+        let response = Response::new()
+            .status(403)
+            .header("X-Test", "preserved")
+            .send("Acesso negado");
+
+        let hyper_response = router.finalize_response(response, Some(session));
+
+        assert_eq!(hyper_response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(hyper_response.headers().get("X-Test").unwrap(), "preserved");
+
+        assert_eq!(hyper_response.body().size_hint().exact(), Some(13));
+    }
+
+    #[tokio::test]
+    async fn finalize_response_preserves_response_when_removal_cookie_fails() {
+        let mut router = Router::new();
+
+        let mut config = SessionConfig::default();
+        config.path.clear();
+
+        router.enable_sessions(config);
+
+        let manager = router.session_manager.as_ref().unwrap();
+
+        let mut session = manager.create();
+        session.destroy();
+
+        let session = Arc::new(Mutex::new(session));
+
+        let response = Response::new().status(401).send("Sessão inválida");
+
+        let hyper_response = router.finalize_response(response, Some(session));
+
+        assert_eq!(hyper_response.status(), StatusCode::UNAUTHORIZED);
+
+        let body = hyper_response.into_body();
+        let bytes = body.collect().await.unwrap().to_bytes();
+
+        assert_eq!(bytes.as_ref(), "Sessão inválida".as_bytes());
     }
 }

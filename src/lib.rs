@@ -41,6 +41,7 @@ mod request;
 mod response;
 mod router;
 mod server;
+pub mod session;
 mod template;
 
 pub use app::App;
