@@ -358,7 +358,8 @@ rustpress-web/
     ├── layouts/
     │   └── main.html
     ├── partials/
-    │   └── .gitkeep
+    │   ├── header.html
+    │   └── footer.htm
     └── index.html
 ```
 
