@@ -6,7 +6,7 @@
 //! # Exemplo
 //!
 //! ```
-//! use rustpress::{Level, Logger};
+//! use rustpress_web::{Level, Logger};
 //! let logger = Logger::new();
 //! logger.set_level(Level::Debug);
 //! logger.info("Servidor preparado");

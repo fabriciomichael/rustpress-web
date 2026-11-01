@@ -8,7 +8,7 @@
 //! ## Exemplo
 //!
 //! ```no_run
-//! use rustpress::{App, Request, Response};
+//! use rustpress_web::{App, Request, Response};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

@@ -23,6 +23,18 @@ pub enum CookieError {
     InvalidAttribute,
 }
 
+impl std::fmt::Display for CookieError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidName => write!(f, "Nome do cookie inválido"),
+            Self::InvalidValue => write!(f, "Valor do cookie inválido"),
+            Self::InvalidAttribute => write!(f, "Atributo do cookie inválido"),
+        }
+    }
+}
+
+impl std::error::Error for CookieError {}
+
 impl Cookie {
     /// Cria um novo cookie.
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
@@ -38,6 +50,90 @@ impl Cookie {
             .into_iter()
             .find(|cookie| cookie.name == name)
             .map(|cookie| cookie.value)
+    }
+
+    /// Procura um cookie pelo nome, rejeitando ocorrências duplicadas.
+    pub fn get_unique(header: &str, name: &str) -> Result<Option<String>, CookieError> {
+        let valid_name = !name.is_empty()
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte));
+
+        if !valid_name {
+            return Err(CookieError::InvalidName);
+        }
+        let mut result = None;
+
+        for part in header.split(';') {
+            let part = part.trim();
+
+            let (cookie_name, value) = match part.split_once('=') {
+                Some((name, value)) => (name.trim(), value),
+                None if part == name => {
+                    return Err(CookieError::InvalidValue);
+                }
+                None => continue,
+            };
+
+            let cookie_name = cookie_name.trim();
+
+            if cookie_name != name {
+                continue;
+            }
+
+            if result.is_some() {
+                return Err(CookieError::InvalidValue);
+            }
+
+            let value = value.trim();
+
+            let value = if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                &value[1..value.len() - 1]
+            } else {
+                value
+            };
+
+            if value.is_empty()
+                || !value.bytes().all(|byte| {
+                    byte == 0x21
+                        || (0x23..=0x2B).contains(&byte)
+                        || (0x2D..=0x3A).contains(&byte)
+                        || (0x3C..=0x5B).contains(&byte)
+                        || (0x5D..=0x7E).contains(&byte)
+                })
+            {
+                return Err(CookieError::InvalidValue);
+            }
+
+            result = Some(value.to_string());
+        }
+
+        Ok(result)
+    }
+
+    /// Procura um cookie em vários cabeçalhos, rejeitando ocorrências duplicadas.
+    pub fn get_unique_from_headers<'a, I>(
+        headers: I,
+        name: &str,
+    ) -> Result<Option<String>, CookieError>
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        Self::get_unique("", name)?;
+
+        let mut result = None;
+
+        for header in headers {
+            if let Some(value) = Self::get_unique(header, name)? {
+                if result.is_some() {
+                    return Err(CookieError::InvalidValue);
+                }
+
+                result = Some(value);
+            }
+        }
+
+        Ok(result)
     }
 
     /// Interpreta um cabeçalho HTTP `Cookie`.
@@ -94,26 +190,7 @@ impl Cookie {
             return Err(CookieError::InvalidValue);
         }
 
-        if config.path.is_empty()
-            || config.path.contains(';')
-            || config.path.bytes().any(|b| b.is_ascii_control())
-        {
-            return Err(CookieError::InvalidAttribute);
-        }
-
-        if let Some(domain) = &config.domain {
-            if domain.is_empty()
-                || !domain
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
-            {
-                return Err(CookieError::InvalidAttribute);
-            }
-        }
-
-        if config.same_site == super::config::SameSite::None && !config.secure {
-            return Err(CookieError::InvalidAttribute);
-        }
+        config.validate()?;
 
         let mut header = format!(
             "{}={}; Path={}; Max-Age={}",
@@ -249,5 +326,115 @@ mod tests {
         let header = cookie.to_set_cookie(&config).unwrap();
 
         assert!(header.contains("; Domain=example.com"));
+    }
+
+    #[test]
+    fn gets_unique_cookie_by_name() {
+        let result = Cookie::get_unique("user=123; session=abc123; theme=dark", "session");
+
+        assert_eq!(result, Ok(Some("abc123".to_string())));
+    }
+
+    #[test]
+    fn rejects_duplicate_session_cookies() {
+        let result = Cookie::get_unique("session=abc123; theme=dark; session=xyz789", "session");
+
+        assert_eq!(result, Err(CookieError::InvalidValue));
+    }
+
+    #[test]
+    fn rejects_empty_session_cookie() {
+        let result = Cookie::get_unique("theme=dark; session=", "session");
+
+        assert_eq!(result, Err(CookieError::InvalidValue));
+    }
+
+    #[test]
+    fn ignores_malformed_unrelated_cookies() {
+        let result = Cookie::get_unique("theme=dark; malformed-cookie; session=abc123", "session");
+
+        assert_eq!(result, Ok(Some("abc123".to_string())));
+    }
+
+    #[test]
+    fn returns_none_when_session_cookie_is_missing() {
+        let result = Cookie::get_unique("user=123; theme=dark", "session");
+
+        assert_eq!(result, Ok(None));
+    }
+
+    #[test]
+    fn rejects_session_cookie_without_equals_sign() {
+        let result = Cookie::get_unique("theme=dark; session; user=123", "session");
+
+        assert_eq!(result, Err(CookieError::InvalidValue));
+    }
+
+    #[test]
+    fn get_unique_from_headers_finds_cookie() {
+        let headers = ["theme=dark; rustpress_session=abc123"];
+
+        let result = Cookie::get_unique_from_headers(headers, "rustpress_session");
+
+        assert_eq!(result.unwrap(), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn get_unique_from_headers_rejects_duplicates() {
+        let headers = ["rustpress_session=abc123", "rustpress_session=xyz789"];
+
+        let result = Cookie::get_unique_from_headers(headers, "rustpress_session");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_unique_from_headers_ignores_unrelated_cookies() {
+        let headers = ["theme=dark", "language=pt", "rustpress_session=abc123"];
+
+        let result = Cookie::get_unique_from_headers(headers, "rustpress_session");
+
+        assert_eq!(result.unwrap(), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn get_unique_from_headers_returns_none_when_cookie_is_missing() {
+        let headers = ["theme=dark", "language=pt"];
+
+        let result = Cookie::get_unique_from_headers(headers, "rustpress_session");
+
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn get_unique_from_headers_rejects_invalid_cookie() {
+        let headers = ["rustpress_session="];
+
+        let result = Cookie::get_unique_from_headers(headers, "rustpress_session");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn gets_unique_quoted_cookie() {
+        let result = Cookie::get_unique("session=\"abc123\"", "session");
+
+        assert_eq!(result, Ok(Some("abc123".to_string())));
+    }
+
+    #[test]
+    fn rejects_invalid_name_in_get_unique() {
+        let result = Cookie::get_unique("session=abc123", "session;admin");
+
+        assert_eq!(result, Err(CookieError::InvalidName));
+    }
+
+    #[test]
+    fn get_unique_from_headers_rejects_invalid_name_without_headers() {
+        let headers: [&str; 0] = [];
+
+        let result = Cookie::get_unique_from_headers(headers, "session;admin");
+
+        assert_eq!(result, Err(CookieError::InvalidName));
     }
 }

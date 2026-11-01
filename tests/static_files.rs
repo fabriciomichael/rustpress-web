@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use rustpress::{App, HandlerError, Request, Response};
+use rustpress_web::{App, HandlerError, Request, Response};
 use tokio::net::TcpListener;
 
 fn request_with_app(app: App, method: &str, path: &str) -> String {

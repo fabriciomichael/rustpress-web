@@ -58,18 +58,18 @@ impl Request {
     ///
     /// Retorna `false` se as sessões não estiverem activadas
     /// ou se não for possível bloquear a sessão.
-    pub fn regenerate_session(&self) -> bool {
+    pub fn regenerate_session(&self) -> Result<bool, crate::session::SessionError> {
         let (Some(session), Some(manager)) = (&self.session, &self.session_manager) else {
-            return false;
+            return Ok(false);
         };
 
-        let Ok(mut session) = session.lock() else {
-            return false;
-        };
+        let mut session = session
+            .lock()
+            .map_err(|_| crate::session::SessionError::LockPoisoned)?;
 
-        manager.regenerate(&mut session);
+        manager.regenerate(&mut session)?;
 
-        true
+        Ok(true)
     }
 
     /// Devolve o método HTTP utilizado na requisição, como `GET`, `POST`,

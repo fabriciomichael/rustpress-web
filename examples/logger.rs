@@ -1,4 +1,4 @@
-use rustpress::{App, Level, Logger};
+use rustpress_web::{App, Level, Logger};
 
 fn main() {
     let mut app = App::new();

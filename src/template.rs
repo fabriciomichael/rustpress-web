@@ -8,7 +8,7 @@
 //! # Exemplo
 //!
 //! ```
-//! use rustpress::TemplateContext;
+//! use rustpress_web::TemplateContext;
 //! use serde_json::json;
 //! let mut context = TemplateContext::new();
 //! context.set("titulo", json!("Catálogo"));

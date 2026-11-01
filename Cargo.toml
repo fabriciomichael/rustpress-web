@@ -1,12 +1,12 @@
 [package]
-name = "rustpress"
+name = "rustpress-web"
 version = "0.1.0"
 edition = "2024"
 description = "A lightweight HTTP framework for Rust inspired by Express.js"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/fabriciomichael/rustpress-web"
-documentation = "https://docs.rs/rustpress"
+documentation = "https://docs.rs/rustpress-web"
 keywords = ["http", "web", "framework", "router", "server"]
 categories = ["web-programming::http-server"]
 

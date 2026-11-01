@@ -50,3 +50,144 @@ impl Default for SessionConfig {
         }
     }
 }
+
+impl SessionConfig {
+    /// Valida as configurações da sessão e do respectivo cookie.
+    pub fn validate(&self) -> Result<(), super::cookie::CookieError> {
+        use super::cookie::CookieError;
+
+        // Validar o nome do cookie.
+        let valid_name = !self.cookie_name.is_empty()
+            && self
+                .cookie_name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte));
+
+        if !valid_name {
+            return Err(CookieError::InvalidName);
+        }
+
+        // O caminho deve começar por "/" e não pode conter
+        // caracteres de controlo nem ponto e vírgula.
+        if !self.path.starts_with('/')
+            || !self
+                .path
+                .bytes()
+                .all(|byte| (0x20..=0x7E).contains(&byte) && byte != b';')
+        {
+            return Err(CookieError::InvalidAttribute);
+        }
+
+        // Validar o domínio, quando definido.
+        if let Some(domain) = &self.domain {
+            let valid_domain = !domain.is_empty()
+                && domain.len() <= 253
+                && domain.split('.').all(|label| {
+                    !label.is_empty()
+                        && label.len() <= 63
+                        && !label.starts_with('-')
+                        && !label.ends_with('-')
+                        && label
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                });
+
+            if !valid_domain {
+                return Err(CookieError::InvalidAttribute);
+            }
+        }
+
+        // SameSite=None exige Secure.
+        if self.same_site == SameSite::None && !self.secure {
+            return Err(CookieError::InvalidAttribute);
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_default_config() {
+        assert!(SessionConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_cookie_name() {
+        let config = SessionConfig {
+            cookie_name: String::new(),
+            ..SessionConfig::default()
+        };
+
+        assert_eq!(
+            config.validate(),
+            Err(super::super::cookie::CookieError::InvalidName)
+        );
+    }
+
+    #[test]
+    fn rejects_path_without_leading_slash() {
+        let config = SessionConfig {
+            path: "sessions".to_string(),
+            ..SessionConfig::default()
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_domain() {
+        let config = SessionConfig {
+            domain: Some("-example.com".to_string()),
+            ..SessionConfig::default()
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_samesite_none_without_secure() {
+        let config = SessionConfig {
+            same_site: SameSite::None,
+            secure: false,
+            ..SessionConfig::default()
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_domain_with_label_too_long() {
+        let domain = format!("{}.com", "a".repeat(64));
+
+        let config = SessionConfig {
+            domain: Some(domain),
+            ..SessionConfig::default()
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn accepts_samesite_none_with_secure() {
+        let config = SessionConfig {
+            same_site: SameSite::None,
+            secure: true,
+            ..SessionConfig::default()
+        };
+
+        assert!(config.validate().is_ok());
+    }
+    #[test]
+    fn rejects_domain_with_empty_label() {
+        let config = SessionConfig {
+            domain: Some("example..com".to_string()),
+            ..SessionConfig::default()
+        };
+
+        assert!(config.validate().is_err());
+    }
+}

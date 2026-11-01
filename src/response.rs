@@ -7,7 +7,7 @@
 //! # Exemplo
 //!
 //! ```
-//! use rustpress::Response;
+//! use rustpress_web::Response;
 //! let response = Response::new().status(201).header("X-Application", "RustPress").json(r#"{"created":true}"#);
 //! ```
 

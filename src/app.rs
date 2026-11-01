@@ -15,7 +15,7 @@ use crate::{
     response::Response,
     router::Router,
     server,
-    session::SessionConfig,
+    session::{CookieError, SessionConfig},
 };
 
 use std::{
@@ -39,20 +39,24 @@ impl App {
     ///
     /// Normalmente é o primeiro passo antes de registar rotas e middleware.
     pub fn new() -> Self {
-        Self {
-            router: Router::new(),
-            logger: Logger::new(),
-        }
+        let logger = Logger::new();
+
+        let mut router = Router::new();
+        router.set_logger(logger.clone());
+
+        Self { router, logger }
     }
 
     /// Activa a gestão de sessões HTTP na aplicação.
     ///
     /// As sessões são armazenadas em memória e utilizam a configuração
     /// fornecida para gerir os cookies de sessão.
-    pub fn use_sessions(&mut self, config: SessionConfig) {
+    /// Activa a gestão de sessões HTTP na aplicação.
+    pub fn use_sessions(&mut self, config: SessionConfig) -> Result<(), CookieError> {
+        config.validate()?;
         self.router.enable_sessions(config);
+        Ok(())
     }
-
     /// Define o nível mínimo de registo da aplicação.
     pub fn set_log_level(&mut self, level: Level) {
         self.logger.set_level(level);

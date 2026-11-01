@@ -1,4 +1,4 @@
-use rustpress::{App, MiddlewareResult, Request, Response, session::SessionConfig};
+use rustpress_web::{App, MiddlewareResult, Request, Response, session::SessionConfig};
 use std::{
     io::{Read, Write},
     net::TcpStream,
@@ -175,7 +175,9 @@ fn advanced_middleware_error_uses_global_error_handler() {
     let mut app = App::new();
 
     app.use_middleware_advanced(|_request: &Request| {
-        MiddlewareResult::Error(rustpress::HandlerError::new("Erro interno confidencial"))
+        MiddlewareResult::Error(rustpress_web::HandlerError::new(
+            "Erro interno confidencial",
+        ))
     });
 
     app.get("/erro-middleware", |_request, response| {
@@ -219,7 +221,9 @@ fn advanced_middleware_error_uses_default_error_response() {
     let mut app = App::new();
 
     app.use_middleware_advanced(|_request: &Request| {
-        MiddlewareResult::Error(rustpress::HandlerError::new("Erro interno confidencial"))
+        MiddlewareResult::Error(rustpress_web::HandlerError::new(
+            "Erro interno confidencial",
+        ))
     });
 
     app.get("/erro-padrao", |_request, response| {
@@ -285,7 +289,9 @@ fn advanced_middleware_error_stops_middleware_chain() {
     let mut app = App::new();
 
     app.use_middleware_advanced(|_request: &Request| {
-        MiddlewareResult::Error(rustpress::HandlerError::new("Erro interno confidencial"))
+        MiddlewareResult::Error(rustpress_web::HandlerError::new(
+            "Erro interno confidencial",
+        ))
     });
 
     app.use_middleware_advanced(|_request: &Request| {
@@ -324,7 +330,7 @@ fn advanced_middleware_error_stops_middleware_chain() {
 fn session_persists_data_between_requests() {
     let mut app = App::new();
 
-    app.use_sessions(SessionConfig::default());
+    app.use_sessions(SessionConfig::default()).unwrap();
 
     app.get("/contador", |request, response| {
         let session = request.session().expect("A sessão não foi disponibilizada");
@@ -365,7 +371,7 @@ fn session_persists_data_between_requests() {
 #[test]
 fn regenerates_session_id_and_sends_new_cookie() {
     let mut app = App::new();
-    app.use_sessions(SessionConfig::default());
+    app.use_sessions(SessionConfig::default()).unwrap();
 
     app.get("/session", |request, response| {
         let session_handle = request.session().expect("A sessão não foi disponibilizada");
@@ -387,7 +393,7 @@ fn regenerates_session_id_and_sends_new_cookie() {
 
         let old_id = username;
 
-        assert!(request.regenerate_session());
+        assert!(request.regenerate_session().unwrap());
 
         let new_id = session_handle.lock().unwrap().id().to_string();
 

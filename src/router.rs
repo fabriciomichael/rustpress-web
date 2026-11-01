@@ -15,6 +15,7 @@ use hyper::{Request as HyperRequest, Response as HyperResponse, body::Incoming, 
 
 use crate::{
     HandlerError, MiddlewareResult, TemplateContext,
+    logger::Logger,
     request::Request,
     response::Response,
     session::{Cookie, MemoryStore, SessionConfig, SessionManager},
@@ -48,6 +49,7 @@ pub(crate) struct Router {
 
     session_manager: Option<Arc<SessionManager>>,
     session_config: Option<SessionConfig>,
+    logger: Logger,
 }
 
 impl Router {
@@ -276,7 +278,15 @@ impl Router {
             None => Vec::new(),
         };
 
-        let session = self.load_session(&request);
+        let session = match self.load_session(&request) {
+            Ok(session) => session,
+            Err(error) => {
+                eprintln!("Erro ao carregar sessão: {error}");
+
+                let response = self.error_response(500);
+                return response.into_hyper();
+            }
+        };
 
         let mut request = Request::new(request, params);
 
@@ -295,7 +305,7 @@ impl Router {
                 MiddlewareResult::Next => {}
 
                 MiddlewareResult::Respond(response) => {
-                    let mut response = self.finalize_response(response, request.session());
+                    let mut response = self.finalize_or_error_response(response, request.session());
 
                     if method == Method::HEAD {
                         *response.body_mut() = Full::new(Bytes::new());
@@ -310,7 +320,7 @@ impl Router {
                         None => self.error_response(error.status()),
                     };
 
-                    let mut response = self.finalize_response(response, request.session());
+                    let mut response = self.finalize_or_error_response(response, request.session());
 
                     if method == Method::HEAD {
                         *response.body_mut() = Full::new(Bytes::new());
@@ -329,7 +339,7 @@ impl Router {
                 let session = request.session();
 
                 match handler(request, Response::new()) {
-                    Ok(response) => self.finalize_response(response, session),
+                    Ok(response) => self.finalize_or_error_response(response, session),
 
                     Err(error) => {
                         let response = match &self.error_handler {
@@ -340,7 +350,7 @@ impl Router {
                             }
                         };
 
-                        self.finalize_response(response, session)
+                        self.finalize_or_error_response(response, session)
                     }
                 }
             }
@@ -360,7 +370,7 @@ impl Router {
                     None => self.error_response(405).header("Allow", &allow),
                 };
 
-                self.finalize_response(response, request.session())
+                self.finalize_or_error_response(response, request.session())
             }
 
             None => {
@@ -371,7 +381,7 @@ impl Router {
                     None => self.error_response(404),
                 };
 
-                self.finalize_response(response, request.session())
+                self.finalize_or_error_response(response, request.session())
             }
         };
         if method == Method::HEAD {
@@ -431,63 +441,140 @@ impl Router {
         Ok(())
     }
 
+    fn resolve_session(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<crate::session::Session, crate::session::SessionStoreError> {
+        let manager = self
+            .session_manager
+            .as_ref()
+            .expect("SessionManager deveria estar configurado");
+
+        match session_id {
+            Some(id) => manager.load(id),
+            None => Ok(manager.create()),
+        }
+    }
+
+    fn extract_session_id(&self, headers: &http::HeaderMap) -> Option<String> {
+        let config = self.session_config.as_ref()?;
+
+        let session_id = headers
+            .get_all(hyper::header::COOKIE)
+            .iter()
+            .map(|header| {
+                header
+                    .to_str()
+                    .map_err(|_| crate::session::cookie::CookieError::InvalidValue)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .and_then(|headers| Cookie::get_unique_from_headers(headers, &config.cookie_name))
+            .ok()
+            .flatten();
+
+        session_id
+    }
+
     /// Recupera a sessão associada a um pedido HTTP.
     fn load_session(
         &self,
         request: &HyperRequest<Incoming>,
-    ) -> Option<Arc<Mutex<crate::session::Session>>> {
-        let manager = self.session_manager.as_ref()?;
-        let config = self.session_config.as_ref()?;
+    ) -> Result<Option<Arc<Mutex<crate::session::Session>>>, crate::session::SessionStoreError>
+    {
+        if self.session_config.is_none() {
+            return Ok(None);
+        }
 
-        let session = request
-            .headers()
-            .get(hyper::header::COOKIE)
-            .and_then(|header| header.to_str().ok())
-            .and_then(|header| Cookie::get(header, &config.cookie_name))
-            .map(|session_id| manager.load(&session_id))
-            .unwrap_or_else(|| manager.create());
+        let session_id = self.extract_session_id(request.headers());
 
-        Some(Arc::new(Mutex::new(session)))
+        let session = self.resolve_session(session_id.as_deref())?;
+
+        Ok(Some(Arc::new(Mutex::new(session))))
     }
-
     /// Finaliza a resposta HTTP e persiste a sessão, quando necessário.
-
     fn finalize_response(
         &self,
         mut response: Response,
         session: Option<Arc<Mutex<crate::session::Session>>>,
-    ) -> HyperResponse<Full<Bytes>> {
+    ) -> Result<HyperResponse<Full<Bytes>>, (crate::session::SessionError, Response)> {
         let Some(session) = session else {
-            return response.into_hyper();
+            return Ok(response.into_hyper());
         };
 
-        let (Ok(session), Some(manager), Some(config)) = (
-            session.lock(),
-            self.session_manager.as_ref(),
-            self.session_config.as_ref(),
-        ) else {
-            return response.into_hyper();
+        let session = match session.lock() {
+            Ok(session) => session,
+            Err(_) => {
+                return Err((crate::session::SessionError::LockPoisoned, response));
+            }
+        };
+
+        let manager = match self.session_manager.as_ref() {
+            Some(manager) => manager,
+            None => {
+                return Err((crate::session::SessionError::Configuration, response));
+            }
+        };
+
+        let config = match self.session_config.as_ref() {
+            Some(config) => config,
+            None => {
+                return Err((crate::session::SessionError::Configuration, response));
+            }
         };
 
         if session.is_destroyed() {
-            manager.destroy(session.id());
+            if let Err(error) = manager.destroy(session.id()) {
+                return Err((error.into(), response));
+            }
 
-            let _ = response.remove_cookie(&config.cookie_name, config);
+            if let Err(error) = response.remove_cookie(&config.cookie_name, config) {
+                return Err((error.into(), response));
+            }
 
-            return response.into_hyper();
+            return Ok(response.into_hyper());
         }
 
         if session.is_modified() {
-            manager.save(&session);
-
             let cookie = Cookie::new(config.cookie_name.clone(), session.id().to_string());
 
-            let _ = response.cookie(&cookie, config);
+            if let Err(error) = response.cookie(&cookie, config) {
+                return Err((error.into(), response));
+            }
 
-            return response.into_hyper();
+            if let Err(error) = manager.save(&session) {
+                return Err((error.into(), response));
+            }
         }
 
-        response.into_hyper()
+        Ok(response.into_hyper())
+    }
+
+    fn finalize_or_error_response(
+        &self,
+        response: Response,
+        session: Option<Arc<Mutex<crate::session::Session>>>,
+    ) -> HyperResponse<Full<Bytes>> {
+        match self.finalize_response(response, session) {
+            Ok(response) => response,
+
+            Err((crate::session::SessionError::Cookie(error), response)) => {
+                self.logger
+                    .error(&format!("Erro ao processar cookie da sessão: {error}"));
+
+                response.into_hyper()
+            }
+
+            Err((error, _response)) => {
+                self.logger
+                    .error(&format!("Erro ao finalizar sessão: {error}"));
+
+                self.error_response(500).into_hyper()
+            }
+        }
+    }
+
+    pub(crate) fn set_logger(&mut self, logger: Logger) {
+        self.logger = logger;
     }
 }
 
@@ -787,6 +874,7 @@ mod tests {
         let mut session = manager.create();
         session.insert("user", "Fabrício").unwrap();
 
+        let session_id = session.id().to_string();
         let session = Arc::new(Mutex::new(session));
 
         let response = Response::new()
@@ -794,12 +882,20 @@ mod tests {
             .header("X-Test", "preserved")
             .send("Acesso negado");
 
-        let hyper_response = router.finalize_response(response, Some(session));
+        let hyper_response = router.finalize_or_error_response(response, Some(session));
 
+        // Verifica se a resposta HTTP foi preservada.
         assert_eq!(hyper_response.status(), StatusCode::FORBIDDEN);
         assert_eq!(hyper_response.headers().get("X-Test").unwrap(), "preserved");
-
         assert_eq!(hyper_response.body().size_hint().exact(), Some(13));
+
+        // Verifica se a sessão não foi guardada.
+        let stored_session = manager.load(&session_id).unwrap();
+
+        assert!(
+            !stored_session.contains("user"),
+            "A sessão não deveria ser guardada quando a criação do cookie falha"
+        );
     }
 
     #[tokio::test]
@@ -814,19 +910,210 @@ mod tests {
         let manager = router.session_manager.as_ref().unwrap();
 
         let mut session = manager.create();
+        session.insert("user", "Fabrício").unwrap();
+
+        let session_id = session.id().to_string();
+
         session.destroy();
 
         let session = Arc::new(Mutex::new(session));
 
         let response = Response::new().status(401).send("Sessão inválida");
 
-        let hyper_response = router.finalize_response(response, Some(session));
+        let hyper_response = router.finalize_or_error_response(response, Some(session));
 
+        // A resposta original deve ser preservada.
         assert_eq!(hyper_response.status(), StatusCode::UNAUTHORIZED);
 
         let body = hyper_response.into_body();
         let bytes = body.collect().await.unwrap().to_bytes();
 
         assert_eq!(bytes.as_ref(), "Sessão inválida".as_bytes());
+
+        // A sessão deve ter sido removida do armazenamento.
+        let stored_session = manager.load(&session_id).unwrap();
+
+        assert!(
+            !stored_session.contains("user"),
+            "A sessão destruída não deveria continuar armazenada"
+        );
+    }
+
+    #[test]
+    fn creates_new_session_when_session_id_is_missing() {
+        let mut router = Router::new();
+        router.enable_sessions(SessionConfig::default());
+
+        let session = router.resolve_session(None).unwrap();
+
+        assert!(!session.id().is_empty());
+        assert!(!session.is_modified());
+    }
+
+    #[test]
+    fn creates_new_session_when_session_id_is_destroyed() {
+        let mut router = Router::new();
+        router.enable_sessions(SessionConfig::default());
+
+        let manager = router.session_manager.as_ref().unwrap();
+
+        let mut original = manager.create();
+        original.insert("user", "Fabrício").unwrap();
+
+        let old_id = original.id().to_string();
+
+        manager.save(&original).unwrap();
+        manager.destroy(&old_id).unwrap();
+
+        let resolved = router.resolve_session(Some(&old_id)).unwrap();
+
+        assert_ne!(resolved.id(), old_id);
+        assert!(!resolved.contains("user"));
+    }
+
+    #[test]
+    fn creates_new_session_when_session_id_has_expired() {
+        let mut router = Router::new();
+        router.enable_sessions(SessionConfig::default());
+
+        let manager = router.session_manager.as_ref().unwrap();
+
+        let original = manager.create();
+        let old_id = original.id().to_string();
+
+        let resolved = router.resolve_session(Some(&old_id)).unwrap();
+
+        assert_ne!(resolved.id(), old_id);
+    }
+
+    #[test]
+    fn extracts_session_id_from_headers() {
+        let mut router = Router::new();
+        router.enable_sessions(SessionConfig::default());
+
+        let mut headers = http::HeaderMap::new();
+
+        headers.insert(
+            hyper::header::COOKIE,
+            "theme=dark; rustpress_session=abc123".parse().unwrap(),
+        );
+
+        let session_id = router.extract_session_id(&headers);
+
+        assert_eq!(session_id, Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn rejects_duplicate_session_cookies_in_same_header() {
+        let mut router = Router::new();
+        router.enable_sessions(SessionConfig::default());
+
+        let mut headers = http::HeaderMap::new();
+
+        headers.insert(
+            hyper::header::COOKIE,
+            "rustpress_session=abc123; rustpress_session=xyz789"
+                .parse()
+                .unwrap(),
+        );
+
+        let session_id = router.extract_session_id(&headers);
+
+        assert!(session_id.is_none());
+    }
+
+    #[test]
+    fn rejects_duplicate_session_cookies_across_headers() {
+        let mut router = Router::new();
+        router.enable_sessions(SessionConfig::default());
+
+        let mut headers = http::HeaderMap::new();
+
+        headers.append(
+            hyper::header::COOKIE,
+            "rustpress_session=abc123".parse().unwrap(),
+        );
+
+        headers.append(
+            hyper::header::COOKIE,
+            "rustpress_session=xyz789".parse().unwrap(),
+        );
+
+        let session_id = router.extract_session_id(&headers);
+
+        assert!(session_id.is_none());
+    }
+
+    #[test]
+    fn rejects_invalid_cookie_header_encoding() {
+        let mut router = Router::new();
+        router.enable_sessions(SessionConfig::default());
+
+        let mut headers = http::HeaderMap::new();
+
+        let invalid_value = http::HeaderValue::from_bytes(&[
+            b'r', b'u', b's', b't', b'=', b'd', b'a', b'r', b'k', 0xFF,
+        ])
+        .unwrap();
+
+        headers.append(hyper::header::COOKIE, invalid_value);
+
+        let session_id = router.extract_session_id(&headers);
+
+        assert!(session_id.is_none());
+    }
+
+    #[test]
+    fn returns_none_when_session_cookie_is_missing() {
+        let mut router = Router::new();
+        router.enable_sessions(SessionConfig::default());
+
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            hyper::header::COOKIE,
+            "theme=dark; language=pt".parse().unwrap(),
+        );
+
+        assert!(router.extract_session_id(&headers).is_none());
+    }
+
+    #[test]
+    fn rejects_session_cookie_without_equals_sign_in_router() {
+        let mut router = Router::new();
+        router.enable_sessions(SessionConfig::default());
+
+        let mut headers = http::HeaderMap::new();
+        headers.insert(hyper::header::COOKIE, "rustpress_session".parse().unwrap());
+
+        assert!(router.extract_session_id(&headers).is_none());
+    }
+
+    #[test]
+    fn rejects_invalid_session_cookie_value_in_router() {
+        let mut router = Router::new();
+        router.enable_sessions(SessionConfig::default());
+
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            hyper::header::COOKIE,
+            "rustpress_session=bad value".parse().unwrap(),
+        );
+
+        assert!(router.extract_session_id(&headers).is_none());
+    }
+
+    #[test]
+    fn returns_none_when_sessions_are_disabled() {
+        let router = Router::new();
+
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            hyper::header::COOKIE,
+            "rustpress_session=550e8400-e29b-41d4-a716-446655440000"
+                .parse()
+                .unwrap(),
+        );
+
+        assert!(router.extract_session_id(&headers).is_none());
     }
 }

@@ -1,4 +1,4 @@
-use rustpress::{App, MiddlewareResult, Request, Response};
+use rustpress_web::{App, MiddlewareResult, Request, Response};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
