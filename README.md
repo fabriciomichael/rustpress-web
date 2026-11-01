@@ -65,6 +65,96 @@ Execute um exemplo:
 cargo run --example basic
 ```
 
+
+## OU
+
+Instala o RustPress Web com RustPress CLI:
+
+```bash
+cargo install rustpress-cli
+```
+
+Depois da instalação, o comando `rustpress` estará disponível no terminal.
+
+## Utilização
+
+### Criar um projecto
+
+```bash
+rustpress new minha_app
+```
+
+### Entrar no projecto
+
+```bash
+cd minha_app
+```
+
+### Executar a aplicação
+
+```bash
+cargo run
+```
+
+Por padrão, o servidor é configurado para iniciar em:
+
+```text
+http://127.0.0.1:3000
+```
+
+### Consultar os comandos disponíveis
+
+```bash
+rustpress --help
+```
+
+### Consultar a versão
+
+```bash
+rustpress --version
+```
+
+## Estrutura do projecto
+
+O RustPress CLI gera uma estrutura inicial semelhante à seguinte:
+
+```text
+minha_app/
+├── Cargo.toml
+├── README.md
+├── src/
+│   ├── main.rs
+│   ├── routes/
+│   │   ├── mod.rs
+│   │   └── web.rs
+│   ├── controllers/
+│   │   ├── mod.rs
+│   │   └── home_controller.rs
+│   ├── models/
+│   │   └── mod.rs
+│   ├── middleware/
+│   │   └── mod.rs
+│   └── config/
+│       └── mod.rs
+├── views/
+│   ├── layouts/
+│   ├── pages/
+│   │   └── home.html
+│   └── partials/
+├── public/
+│   ├── css/
+│   ├── js/
+│   └── images/
+└── tests/
+```
+
+## Saiba mais em:
+
+```bash
+git clone https://github.com/fabriciomichael/rustpress-cli.git
+```
+
+
 O servidor de demonstração fica disponível em `http://127.0.0.1:3000`.
 
 > **Nota sobre a utilização como dependência:** o código do repositório tem o nome de pacote `rustpress`, mas os metadados de publicação e o URL de repositório ainda devem ser alinhados antes de apresentar `cargo add rustpress` como instrução de instalação de uma versão publicada. Para desenvolver com este repositório, use os comandos acima.
