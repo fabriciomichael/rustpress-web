@@ -183,4 +183,15 @@ impl RequestContext {
             .find(|(key, _)| key.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.as_str())
     }
+
+    #[cfg(test)]
+    pub(crate) fn test() -> Self {
+        Self {
+            method: hyper::http::Method::GET,
+            path: "/teste".to_string(),
+            params: Vec::new(),
+            query: None,
+            headers: Vec::new(),
+        }
+    }
 }

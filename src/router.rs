@@ -106,6 +106,17 @@ impl Router {
         self.error_handler = Some(Arc::new(handler));
     }
 
+    /// Processa um erro e determina a resposta HTTP correspondente.
+    fn handle_error(&self, error: &HandlerError, context: &crate::RequestContext) -> Response {
+        self.logger
+            .error(&format!("Erro HTTP {}: {}", error.status(), error));
+
+        match &self.error_handler {
+            Some(error_handler) => error_handler(error, context),
+            None => self.error_response(error.status()),
+        }
+    }
+
     /// Compara um padrão de rota com o caminho da requisição.
     ///
     /// Quando encontra um marcador `:nome`, extrai o valor correspondente e
@@ -278,17 +289,28 @@ impl Router {
             None => Vec::new(),
         };
 
-        let session = match self.load_session(&request) {
-            Ok(session) => session,
-            Err(error) => {
-                eprintln!("Erro ao carregar sessão: {error}");
+        // Extrai o identificador antes de transferir a requisição HTTP.
+        let session_id = self.extract_session_id(request.headers());
 
-                let response = self.error_response(500);
-                return response.into_hyper();
+        // Cria o objecto Request e o contexto antes de carregar a sessão.
+        let mut request = Request::new(request, params);
+        let context = request.context();
+
+        // Carrega a sessão.
+        let session = match self.load_session(session_id.as_deref()) {
+            Ok(session) => session,
+
+            Err(error) => {
+                let handler_error = HandlerError::with_status_and_details(
+                    500,
+                    "Não foi possível carregar a sessão.",
+                    error.to_string(),
+                )
+                .with_source(error);
+
+                return self.handle_error(&handler_error, &context).into_hyper();
             }
         };
-
-        let mut request = Request::new(request, params);
 
         if let Some(session) = session {
             request.set_session(session);
@@ -298,14 +320,13 @@ impl Router {
             request.set_session_manager(manager);
         }
 
-        let context = request.context();
-
         for middleware in &self.middlewares {
             match middleware(&request) {
                 MiddlewareResult::Next => {}
 
                 MiddlewareResult::Respond(response) => {
-                    let mut response = self.finalize_or_error_response(response, request.session());
+                    let mut response =
+                        self.finalize_or_error_response(response, request.session(), &context);
 
                     if method == Method::HEAD {
                         *response.body_mut() = Full::new(Bytes::new());
@@ -315,12 +336,10 @@ impl Router {
                 }
 
                 MiddlewareResult::Error(error) => {
-                    let response = match &self.error_handler {
-                        Some(error_handler) => error_handler(&error, &context),
-                        None => self.error_response(error.status()),
-                    };
+                    let response = self.handle_error(&error, &context);
 
-                    let mut response = self.finalize_or_error_response(response, request.session());
+                    let mut response =
+                        self.finalize_or_error_response(response, request.session(), &context);
 
                     if method == Method::HEAD {
                         *response.body_mut() = Full::new(Bytes::new());
@@ -331,26 +350,18 @@ impl Router {
             }
         }
 
-        let context = request.context();
-
         let mut response = match matched {
             Some((handler, _)) => {
                 // Guardamos a sessão antes de mover Request para o handler.
                 let session = request.session();
 
                 match handler(request, Response::new()) {
-                    Ok(response) => self.finalize_or_error_response(response, session),
+                    Ok(response) => self.finalize_or_error_response(response, session, &context),
 
                     Err(error) => {
-                        let response = match &self.error_handler {
-                            Some(error_handler) => error_handler(&error, &context),
-                            None => {
-                                eprintln!("Erro no handler: {error}");
-                                self.error_response(error.status())
-                            }
-                        };
+                        let response = self.handle_error(&error, &context);
 
-                        self.finalize_or_error_response(response, session)
+                        self.finalize_or_error_response(response, session, &context)
                     }
                 }
             }
@@ -365,23 +376,17 @@ impl Router {
 
                 let error = HandlerError::with_status(405, "Método não permitido");
 
-                let response = match &self.error_handler {
-                    Some(error_handler) => error_handler(&error, &context).header("Allow", &allow),
-                    None => self.error_response(405).header("Allow", &allow),
-                };
+                let response = self.handle_error(&error, &context).header("Allow", &allow);
 
-                self.finalize_or_error_response(response, request.session())
+                self.finalize_or_error_response(response, request.session(), &context)
             }
 
             None => {
                 let error = HandlerError::with_status(404, "Rota não encontrada");
 
-                let response = match &self.error_handler {
-                    Some(error_handler) => error_handler(&error, &context),
-                    None => self.error_response(404),
-                };
+                let response = self.handle_error(&error, &context);
 
-                self.finalize_or_error_response(response, request.session())
+                self.finalize_or_error_response(response, request.session(), &context)
             }
         };
         if method == Method::HEAD {
@@ -478,16 +483,14 @@ impl Router {
     /// Recupera a sessão associada a um pedido HTTP.
     fn load_session(
         &self,
-        request: &HyperRequest<Incoming>,
+        session_id: Option<&str>,
     ) -> Result<Option<Arc<Mutex<crate::session::Session>>>, crate::session::SessionStoreError>
     {
         if self.session_config.is_none() {
             return Ok(None);
         }
 
-        let session_id = self.extract_session_id(request.headers());
-
-        let session = self.resolve_session(session_id.as_deref())?;
+        let session = self.resolve_session(session_id)?;
 
         Ok(Some(Arc::new(Mutex::new(session))))
     }
@@ -553,22 +556,20 @@ impl Router {
         &self,
         response: Response,
         session: Option<Arc<Mutex<crate::session::Session>>>,
+        context: &crate::RequestContext,
     ) -> HyperResponse<Full<Bytes>> {
         match self.finalize_response(response, session) {
             Ok(response) => response,
 
-            Err((crate::session::SessionError::Cookie(error), response)) => {
-                self.logger
-                    .error(&format!("Erro ao processar cookie da sessão: {error}"));
-
-                response.into_hyper()
-            }
-
             Err((error, _response)) => {
-                self.logger
-                    .error(&format!("Erro ao finalizar sessão: {error}"));
+                let handler_error = HandlerError::with_status_and_details(
+                    500,
+                    "Ocorreu um erro interno no servidor.",
+                    error.to_string(),
+                )
+                .with_source(error);
 
-                self.error_response(500).into_hyper()
+                self.handle_error(&handler_error, context).into_hyper()
             }
         }
     }
@@ -584,8 +585,11 @@ mod tests {
     use crate::session::SessionConfig;
     use http::StatusCode;
     use http_body_util::BodyExt;
-    use hyper::body::Body;
     use std::sync::{Arc, Mutex};
+
+    fn create_test_context() -> crate::RequestContext {
+        crate::RequestContext::test()
+    }
 
     #[test]
     fn matches_static_route() {
@@ -861,7 +865,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn finalize_response_preserves_response_when_cookie_fails() {
+    async fn finalize_response_uses_global_handler_when_cookie_fails() {
         let mut router = Router::new();
 
         let mut config = SessionConfig::default();
@@ -869,7 +873,7 @@ mod tests {
 
         router.enable_sessions(config);
 
-        let manager = router.session_manager.as_ref().unwrap();
+        let manager = Arc::clone(router.session_manager.as_ref().unwrap());
 
         let mut session = manager.create();
         session.insert("user", "Fabrício").unwrap();
@@ -877,29 +881,57 @@ mod tests {
         let session_id = session.id().to_string();
         let session = Arc::new(Mutex::new(session));
 
+        // Guarda os dados recebidos pelo handler global.
+        let captured = Arc::new(Mutex::new(None));
+        let captured_handler = Arc::clone(&captured);
+
+        router.set_error_handler(move |error, context| {
+            *captured_handler.lock().unwrap() = Some((
+                error.status(),
+                error.details().map(str::to_owned),
+                std::error::Error::source(error).is_some(),
+                context.path().to_string(),
+            ));
+
+            Response::new().status(500).send("Erro tratado globalmente")
+        });
+
         let response = Response::new()
             .status(403)
-            .header("X-Test", "preserved")
+            .header("X-Test", "original")
             .send("Acesso negado");
 
-        let hyper_response = router.finalize_or_error_response(response, Some(session));
+        let context = create_test_context();
 
-        // Verifica se a resposta HTTP foi preservada.
-        assert_eq!(hyper_response.status(), StatusCode::FORBIDDEN);
-        assert_eq!(hyper_response.headers().get("X-Test").unwrap(), "preserved");
-        assert_eq!(hyper_response.body().size_hint().exact(), Some(13));
+        let hyper_response = router.finalize_or_error_response(response, Some(session), &context);
 
-        // Verifica se a sessão não foi guardada.
+        // A resposta deve ser a produzida pelo handler global.
+        assert_eq!(hyper_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body = hyper_response.into_body();
+        let bytes = body.collect().await.unwrap().to_bytes();
+
+        assert_eq!(bytes.as_ref(), "Erro tratado globalmente".as_bytes());
+
+        // Verifica os dados recebidos pelo handler global.
+        let captured = captured.lock().unwrap();
+        let (status, details, has_source, path) = captured
+            .as_ref()
+            .expect("O handler global deveria ser chamado");
+
+        assert_eq!(*status, 500);
+        assert!(details.is_some());
+        assert!(*has_source);
+        assert_eq!(path, "/teste");
+
+        // A sessão não deve ser guardada quando a criação do cookie falha.
         let stored_session = manager.load(&session_id).unwrap();
 
-        assert!(
-            !stored_session.contains("user"),
-            "A sessão não deveria ser guardada quando a criação do cookie falha"
-        );
+        assert!(!stored_session.contains("user"));
     }
 
     #[tokio::test]
-    async fn finalize_response_preserves_response_when_removal_cookie_fails() {
+    async fn finalize_response_uses_global_handler_when_removal_cookie_fails() {
         let mut router = Router::new();
 
         let mut config = SessionConfig::default();
@@ -907,7 +939,7 @@ mod tests {
 
         router.enable_sessions(config);
 
-        let manager = router.session_manager.as_ref().unwrap();
+        let manager = Arc::clone(router.session_manager.as_ref().unwrap());
 
         let mut session = manager.create();
         session.insert("user", "Fabrício").unwrap();
@@ -918,25 +950,47 @@ mod tests {
 
         let session = Arc::new(Mutex::new(session));
 
+        let captured = Arc::new(Mutex::new(None));
+        let captured_handler = Arc::clone(&captured);
+
+        router.set_error_handler(move |error, context| {
+            *captured_handler.lock().unwrap() = Some((
+                error.status(),
+                error.details().map(str::to_owned),
+                std::error::Error::source(error).is_some(),
+                context.path().to_string(),
+            ));
+
+            Response::new().status(500).send("Erro tratado globalmente")
+        });
+
         let response = Response::new().status(401).send("Sessão inválida");
 
-        let hyper_response = router.finalize_or_error_response(response, Some(session));
+        let context = create_test_context();
 
-        // A resposta original deve ser preservada.
-        assert_eq!(hyper_response.status(), StatusCode::UNAUTHORIZED);
+        let hyper_response = router.finalize_or_error_response(response, Some(session), &context);
+
+        assert_eq!(hyper_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
         let body = hyper_response.into_body();
         let bytes = body.collect().await.unwrap().to_bytes();
 
-        assert_eq!(bytes.as_ref(), "Sessão inválida".as_bytes());
+        assert_eq!(bytes.as_ref(), "Erro tratado globalmente".as_bytes());
 
-        // A sessão deve ter sido removida do armazenamento.
+        let captured = captured.lock().unwrap();
+        let (status, details, has_source, path) = captured
+            .as_ref()
+            .expect("O handler global deveria ser chamado");
+
+        assert_eq!(*status, 500);
+        assert!(details.is_some());
+        assert!(*has_source);
+        assert_eq!(path, "/teste");
+
+        // A sessão destruída deve continuar removida do armazenamento.
         let stored_session = manager.load(&session_id).unwrap();
 
-        assert!(
-            !stored_session.contains("user"),
-            "A sessão destruída não deveria continuar armazenada"
-        );
+        assert!(!stored_session.contains("user"));
     }
 
     #[test]
@@ -955,7 +1009,7 @@ mod tests {
         let mut router = Router::new();
         router.enable_sessions(SessionConfig::default());
 
-        let manager = router.session_manager.as_ref().unwrap();
+        let manager = Arc::clone(router.session_manager.as_ref().unwrap());
 
         let mut original = manager.create();
         original.insert("user", "Fabrício").unwrap();
@@ -976,7 +1030,7 @@ mod tests {
         let mut router = Router::new();
         router.enable_sessions(SessionConfig::default());
 
-        let manager = router.session_manager.as_ref().unwrap();
+        let manager = Arc::clone(router.session_manager.as_ref().unwrap());
 
         let original = manager.create();
         let old_id = original.id().to_string();
