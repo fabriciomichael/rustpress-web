@@ -61,6 +61,11 @@ impl Response {
         self
     }
 
+    /// Devolve o código de estado HTTP da resposta.
+    pub fn status_code(&self) -> u16 {
+        self.status.as_u16()
+    }
+
     /// Cria uma resposta HTTP de erro com uma mensagem em texto simples.
     pub fn error(code: u16, message: impl Into<String>) -> Self {
         Self::new().status(code).send(message)

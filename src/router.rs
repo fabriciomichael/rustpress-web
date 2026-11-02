@@ -112,7 +112,26 @@ impl Router {
             .error(&format!("Erro HTTP {}: {}", error.status(), error));
 
         match &self.error_handler {
-            Some(error_handler) => error_handler(error, context),
+            Some(error_handler) => {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    error_handler(error, context)
+                })) {
+                    Ok(response) => response,
+
+                    Err(payload) => {
+                        let message = extract_panic_message(payload.as_ref());
+
+                        self.logger.error(&format!(
+                            "O Global Error Handler entrou em panic: {}. \
+                            Será utilizada a resposta de erro padrão.",
+                            message
+                        ));
+
+                        self.error_response(500)
+                    }
+                }
+            }
+
             None => self.error_response(error.status()),
         }
     }
@@ -576,6 +595,16 @@ impl Router {
 
     pub(crate) fn set_logger(&mut self, logger: Logger) {
         self.logger = logger;
+    }
+}
+
+fn extract_panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        message.as_str()
+    } else if let Some(message) = payload.downcast_ref::<&'static str>() {
+        message
+    } else {
+        "O panic contém um payload desconhecido."
     }
 }
 
@@ -1169,5 +1198,46 @@ mod tests {
         );
 
         assert!(router.extract_session_id(&headers).is_none());
+    }
+
+    #[test]
+    fn global_error_handler_panic_uses_default_response() {
+        let mut router = Router::new();
+
+        router.set_error_handler(|_, _| {
+            panic!("Falha simulada no Global Error Handler");
+        });
+
+        let context = create_test_context();
+
+        let error = HandlerError::new("Erro original");
+
+        let response = router.handle_error(&error, &context);
+
+        assert_eq!(response.status_code(), 500);
+    }
+
+    #[test]
+    fn extracts_string_panic_message() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(String::from("Erro em String"));
+
+        assert_eq!(extract_panic_message(payload.as_ref()), "Erro em String");
+    }
+
+    #[test]
+    fn extracts_static_str_panic_message() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new("Erro em &str");
+
+        assert_eq!(extract_panic_message(payload.as_ref()), "Erro em &str");
+    }
+
+    #[test]
+    fn handles_unknown_panic_payload() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(123);
+
+        assert_eq!(
+            extract_panic_message(payload.as_ref()),
+            "O panic contém um payload desconhecido."
+        );
     }
 }
