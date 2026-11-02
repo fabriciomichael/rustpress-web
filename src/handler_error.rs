@@ -3,7 +3,6 @@
 //! [`HandlerError`] transporta uma mensagem e um código HTTP de erro. Por
 //! omissão, os erros representam HTTP 500; use [`HandlerError::with_status`]
 //! para estados entre 400 e 599.
-//! Tipo de erro usado pelos handlers e middlewares do RustPress.
 
 use std::{error::Error, fmt};
 

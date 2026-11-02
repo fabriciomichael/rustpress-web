@@ -47,6 +47,62 @@ fn request_with_app(app: App, method: &str, path: &str) -> String {
     }
 }
 
+fn request_twice_with_app(
+    app: App,
+    first_method: &str,
+    first_path: &str,
+    second_method: &str,
+    second_path: &str,
+) -> (String, String) {
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("Não foi possível reservar uma porta");
+
+    listener.set_nonblocking(true).unwrap();
+
+    let address = listener.local_addr().unwrap();
+
+    let _server_thread = thread::spawn(move || {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        runtime.block_on(async move {
+            let listener = TcpListener::from_std(listener).unwrap();
+            app.serve_listener(listener).await.unwrap();
+        });
+    });
+
+    fn send_request(address: &std::net::SocketAddr, method: &str, path: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(10);
+
+        loop {
+            if Instant::now() >= deadline {
+                panic!("O servidor não ficou disponível a tempo");
+            }
+
+            if let Ok(mut stream) = TcpStream::connect_timeout(address, Duration::from_millis(200))
+            {
+                let request = format!(
+                    "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+                );
+
+                stream.write_all(request.as_bytes()).unwrap();
+
+                let mut response = String::new();
+                stream.read_to_string(&mut response).unwrap();
+
+                return response;
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    let first_response = send_request(&address, first_method, first_path);
+
+    let second_response = send_request(&address, second_method, second_path);
+
+    (first_response, second_response)
+}
+
 fn request_twice_with_cookie(app: App, method: &str, path: &str) -> (String, String) {
     let listener =
         std::net::TcpListener::bind("127.0.0.1:0").expect("Não foi possível reservar uma porta");
@@ -416,4 +472,109 @@ fn regenerates_session_id_and_sends_new_cookie() {
             .contains(&format!("set-cookie: rustpress_session={new_id}").to_ascii_lowercase())
     );
     assert_eq!(second_body, format!("{new_id}:fabricio"));
+}
+
+#[test]
+fn route_handler_panic_uses_global_error_handler_and_server_continues() {
+    let mut app = App::new();
+
+    app.get("/panic", |_request, _response| {
+        panic!("Erro simulado no handler");
+    })
+    .expect("Não foi possível registar a rota");
+
+    app.get("/normal", |_request, response| {
+        Ok(response.send("Servidor continua funcional"))
+    })
+    .expect("Não foi possível registar a rota");
+
+    app.set_error_handler(|error, context| {
+        Response::new().status(error.status()).send(format!(
+            "Erro global em {} {}",
+            context.method(),
+            context.path()
+        ))
+    });
+
+    let (panic_response, normal_response) =
+        request_twice_with_app(app, "GET", "/panic", "GET", "/normal");
+
+    assert!(
+        panic_response.contains("500 Internal Server Error"),
+        "O panic deveria produzir HTTP 500: {panic_response}"
+    );
+
+    assert!(
+        panic_response.contains("Erro global em GET /panic"),
+        "O Global Error Handler não tratou o panic: {panic_response}"
+    );
+
+    assert!(
+        !panic_response.contains("Erro simulado no handler"),
+        "A resposta revelou a mensagem técnica do panic: {panic_response}"
+    );
+
+    assert!(
+        normal_response.contains("200 OK"),
+        "O servidor não continuou a responder: {normal_response}"
+    );
+
+    assert!(
+        normal_response.contains("Servidor continua funcional"),
+        "A segunda rota não foi executada: {normal_response}"
+    );
+}
+
+#[test]
+fn middleware_panic_uses_global_error_handler_and_server_continues() {
+    let mut app = App::new();
+
+    app.use_middleware_advanced(|request: &Request| {
+        if request.path() == "/middleware-panic" {
+            panic!("Erro simulado no middleware");
+        }
+
+        MiddlewareResult::Next
+    });
+
+    app.get("/normal", |_request, response| {
+        Ok(response.send("Servidor continua funcional"))
+    })
+    .expect("Não foi possível registar a rota");
+
+    app.set_error_handler(|error, context| {
+        Response::new().status(error.status()).send(format!(
+            "Erro global em {} {}",
+            context.method(),
+            context.path()
+        ))
+    });
+
+    let (panic_response, normal_response) =
+        request_twice_with_app(app, "GET", "/middleware-panic", "GET", "/normal");
+
+    assert!(
+        panic_response.contains("500 Internal Server Error"),
+        "O panic deveria produzir HTTP 500: {panic_response}"
+    );
+
+    assert!(
+        panic_response.contains("Erro global em GET /middleware-panic"),
+        "O Global Error Handler não tratou o panic: {panic_response}"
+    );
+
+    assert!(
+        !panic_response.contains("Erro simulado no middleware"),
+        "A resposta revelou detalhes técnicos: {panic_response}"
+    );
+
+    assert!(
+        normal_response.contains("200 OK"),
+        "O servidor não continuou a responder: {normal_response}"
+    );
+
+    assert!(
+        normal_response.contains("Servidor continua funcional"),
+        "A segunda rota não foi executada: {normal_response}"
+    );
 }

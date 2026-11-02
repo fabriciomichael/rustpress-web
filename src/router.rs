@@ -36,6 +36,12 @@ type Middleware = Arc<dyn Fn(&Request) -> MiddlewareResult + Send + Sync>;
 
 type RouteKey = (Method, String);
 
+#[derive(Clone)]
+struct SessionState {
+    manager: Arc<SessionManager>,
+    config: SessionConfig,
+}
+
 /// Responsável por guardar rotas, processar padrões e disparar middlewares.
 ///
 /// A estrutura é interna ao framework e funciona como o componente central de
@@ -47,8 +53,8 @@ pub(crate) struct Router {
     middlewares: Vec<Middleware>,
     error_handler: Option<ErrorHandler>,
 
-    session_manager: Option<Arc<SessionManager>>,
-    session_config: Option<SessionConfig>,
+    session: Option<SessionState>,
+
     logger: Logger,
 }
 
@@ -63,8 +69,10 @@ impl Router {
         let manager =
             SessionManager::with_ttl(MemoryStore::new(), Duration::from_secs(config.max_age));
 
-        self.session_manager = Some(Arc::new(manager));
-        self.session_config = Some(config);
+        self.session = Some(SessionState {
+            manager: Arc::new(manager),
+            config,
+        });
     }
 
     /// Regista uma nova rota no router.
@@ -106,10 +114,27 @@ impl Router {
         self.error_handler = Some(Arc::new(handler));
     }
 
-    /// Processa um erro e determina a resposta HTTP correspondente.
+    /// Regista o handler global para tratar erros durante o processamento
+    /// dos pedidos HTTP.
     fn handle_error(&self, error: &HandlerError, context: &crate::RequestContext) -> Response {
-        self.logger
-            .error(&format!("Erro HTTP {}: {}", error.status(), error));
+        self.logger.error(&format!(
+            "Erro HTTP {}: {}",
+            error.status(),
+            error.public_message()
+        ));
+
+        if let Some(details) = error.details() {
+            self.logger
+                .error(&format!("Detalhes técnicos: {}", details));
+        }
+
+        let mut source = std::error::Error::source(error);
+
+        while let Some(cause) = source {
+            self.logger.error(&format!("Causa original: {}", cause));
+
+            source = std::error::Error::source(cause);
+        }
 
         match &self.error_handler {
             Some(error_handler) => {
@@ -335,12 +360,28 @@ impl Router {
             request.set_session(session);
         }
 
-        if let Some(manager) = self.session_manager.clone() {
-            request.set_session_manager(manager);
+        if let Some(session) = &self.session {
+            request.set_session_manager(Arc::clone(&session.manager));
         }
 
         for middleware in &self.middlewares {
-            match middleware(&request) {
+            let middleware_result =
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    middleware(&request)
+                })) {
+                    Ok(result) => result,
+
+                    Err(payload) => {
+                        let message = extract_panic_message(payload.as_ref());
+
+                        MiddlewareResult::Error(HandlerError::with_details(
+                            "Ocorreu um erro interno no servidor.",
+                            format!("Panic no middleware: {}", message),
+                        ))
+                    }
+                };
+
+            match middleware_result {
                 MiddlewareResult::Next => {}
 
                 MiddlewareResult::Respond(response) => {
@@ -374,10 +415,27 @@ impl Router {
                 // Guardamos a sessão antes de mover Request para o handler.
                 let session = request.session();
 
-                match handler(request, Response::new()) {
-                    Ok(response) => self.finalize_or_error_response(response, session, &context),
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handler(request, Response::new())
+                })) {
+                    Ok(Ok(response)) => {
+                        self.finalize_or_error_response(response, session, &context)
+                    }
 
-                    Err(error) => {
+                    Ok(Err(error)) => {
+                        let response = self.handle_error(&error, &context);
+
+                        self.finalize_or_error_response(response, session, &context)
+                    }
+
+                    Err(payload) => {
+                        let message = extract_panic_message(payload.as_ref());
+
+                        let error = HandlerError::with_details(
+                            "Ocorreu um erro interno no servidor.",
+                            format!("Panic no handler da rota: {}", message),
+                        );
+
                         let response = self.handle_error(&error, &context);
 
                         self.finalize_or_error_response(response, session, &context)
@@ -468,20 +526,19 @@ impl Router {
     fn resolve_session(
         &self,
         session_id: Option<&str>,
-    ) -> Result<crate::session::Session, crate::session::SessionStoreError> {
-        let manager = self
-            .session_manager
-            .as_ref()
-            .expect("SessionManager deveria estar configurado");
+    ) -> Result<Option<crate::session::Session>, crate::session::SessionStoreError> {
+        let Some(session) = self.session.as_ref() else {
+            return Ok(None);
+        };
 
         match session_id {
-            Some(id) => manager.load(id),
-            None => Ok(manager.create()),
+            Some(id) => session.manager.load(id).map(Some),
+            None => Ok(Some(session.manager.create())),
         }
     }
 
     fn extract_session_id(&self, headers: &http::HeaderMap) -> Option<String> {
-        let config = self.session_config.as_ref()?;
+        let config = &self.session.as_ref()?.config;
 
         let session_id = headers
             .get_all(hyper::header::COOKIE)
@@ -505,11 +562,9 @@ impl Router {
         session_id: Option<&str>,
     ) -> Result<Option<Arc<Mutex<crate::session::Session>>>, crate::session::SessionStoreError>
     {
-        if self.session_config.is_none() {
+        let Some(session) = self.resolve_session(session_id)? else {
             return Ok(None);
-        }
-
-        let session = self.resolve_session(session_id)?;
+        };
 
         Ok(Some(Arc::new(Mutex::new(session))))
     }
@@ -530,19 +585,15 @@ impl Router {
             }
         };
 
-        let manager = match self.session_manager.as_ref() {
-            Some(manager) => manager,
+        let session_state = match self.session.as_ref() {
+            Some(session_state) => session_state,
             None => {
                 return Err((crate::session::SessionError::Configuration, response));
             }
         };
 
-        let config = match self.session_config.as_ref() {
-            Some(config) => config,
-            None => {
-                return Err((crate::session::SessionError::Configuration, response));
-            }
-        };
+        let manager = &session_state.manager;
+        let config = &session_state.config;
 
         if session.is_destroyed() {
             if let Err(error) = manager.destroy(session.id()) {
@@ -902,7 +953,7 @@ mod tests {
 
         router.enable_sessions(config);
 
-        let manager = Arc::clone(router.session_manager.as_ref().unwrap());
+        let manager = Arc::clone(&router.session.as_ref().unwrap().manager);
 
         let mut session = manager.create();
         session.insert("user", "Fabrício").unwrap();
@@ -968,7 +1019,7 @@ mod tests {
 
         router.enable_sessions(config);
 
-        let manager = Arc::clone(router.session_manager.as_ref().unwrap());
+        let manager = Arc::clone(&router.session.as_ref().unwrap().manager);
 
         let mut session = manager.create();
         session.insert("user", "Fabrício").unwrap();
@@ -1027,7 +1078,10 @@ mod tests {
         let mut router = Router::new();
         router.enable_sessions(SessionConfig::default());
 
-        let session = router.resolve_session(None).unwrap();
+        let session = router
+            .resolve_session(None)
+            .unwrap()
+            .expect("Deveria criar uma nova sessão");
 
         assert!(!session.id().is_empty());
         assert!(!session.is_modified());
@@ -1038,7 +1092,7 @@ mod tests {
         let mut router = Router::new();
         router.enable_sessions(SessionConfig::default());
 
-        let manager = Arc::clone(router.session_manager.as_ref().unwrap());
+        let manager = Arc::clone(&router.session.as_ref().unwrap().manager);
 
         let mut original = manager.create();
         original.insert("user", "Fabrício").unwrap();
@@ -1048,7 +1102,10 @@ mod tests {
         manager.save(&original).unwrap();
         manager.destroy(&old_id).unwrap();
 
-        let resolved = router.resolve_session(Some(&old_id)).unwrap();
+        let resolved = router
+            .resolve_session(Some(&old_id))
+            .unwrap()
+            .expect("Deveria criar uma nova sessão após a destruição");
 
         assert_ne!(resolved.id(), old_id);
         assert!(!resolved.contains("user"));
@@ -1059,12 +1116,15 @@ mod tests {
         let mut router = Router::new();
         router.enable_sessions(SessionConfig::default());
 
-        let manager = Arc::clone(router.session_manager.as_ref().unwrap());
+        let manager = Arc::clone(&router.session.as_ref().unwrap().manager);
 
         let original = manager.create();
         let old_id = original.id().to_string();
 
-        let resolved = router.resolve_session(Some(&old_id)).unwrap();
+        let resolved = router
+            .resolve_session(Some(&old_id))
+            .unwrap()
+            .expect("Deveria criar uma nova sessão após a expiração");
 
         assert_ne!(resolved.id(), old_id);
     }
