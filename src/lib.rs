@@ -31,7 +31,8 @@
 //! - [`Logger`] e [`Level`]: registo de eventos.
 //! - [`TemplateContext`] e [`TemplateError`]: motor de templates.
 //!
-//! A leitura do corpo HTTP, parsing de formulários e uploads multipart ainda não fazem parte da API pública.
+//! A API inclui leitura do corpo HTTP, parsing de formulários,
+//! gestão de cookies e sessões. Uploads multipart ainda não estão disponíveis.
 
 mod app;
 mod handler_error;
@@ -47,7 +48,7 @@ mod template;
 pub use app::App;
 pub use handler_error::HandlerError;
 pub use logger::{Level, Logger};
-pub use middleware::MiddlewareResult;
+pub use middleware::{AuthMiddleware, MiddlewareResult, RoleMiddleware};
 pub use request::{Request, RequestContext};
 pub use response::Response;
 pub use template::{TemplateContext, TemplateError};
