@@ -54,26 +54,19 @@ impl Default for SessionConfig {
 impl SessionConfig {
     /// Valida as configurações da sessão e do respectivo cookie.
     pub fn validate(&self) -> Result<(), super::cookie::CookieError> {
-        use super::cookie::CookieError;
+        use super::cookie::{CookieError, is_valid_cookie_name};
 
         // Validar o nome do cookie.
-        let valid_name = !self.cookie_name.is_empty()
-            && self
-                .cookie_name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte));
-
-        if !valid_name {
+        if !is_valid_cookie_name(&self.cookie_name) {
             return Err(CookieError::InvalidName);
         }
 
         // O caminho deve começar por "/" e não pode conter
         // caracteres de controlo nem ponto e vírgula.
         if !self.path.starts_with('/')
-            || !self
-                .path
-                .bytes()
-                .all(|byte| (0x20..=0x7E).contains(&byte) && byte != b';')
+            || !self.path.bytes().all(|byte| {
+                (0x20..=0x7E).contains(&byte) && !matches!(byte, b';' | b',' | b'"' | b'\\')
+            })
         {
             return Err(CookieError::InvalidAttribute);
         }
@@ -82,6 +75,7 @@ impl SessionConfig {
         if let Some(domain) = &self.domain {
             let valid_domain = !domain.is_empty()
                 && domain.len() <= 253
+                && domain.contains('.')
                 && domain.split('.').all(|label| {
                     !label.is_empty()
                         && label.len() <= 63
@@ -90,7 +84,11 @@ impl SessionConfig {
                         && label
                             .bytes()
                             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                });
+                })
+                && domain
+                    .rsplit('.')
+                    .next()
+                    .is_some_and(|label| label.bytes().any(|byte| byte.is_ascii_alphabetic()));
 
             if !valid_domain {
                 return Err(CookieError::InvalidAttribute);
@@ -185,6 +183,26 @@ mod tests {
     fn rejects_domain_with_empty_label() {
         let config = SessionConfig {
             domain: Some("example..com".to_string()),
+            ..SessionConfig::default()
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_domain_without_dot() {
+        let config = SessionConfig {
+            domain: Some("localhost".to_string()),
+            ..SessionConfig::default()
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_domain_with_numeric_tld() {
+        let config = SessionConfig {
+            domain: Some("example.123".to_string()),
             ..SessionConfig::default()
         };
 

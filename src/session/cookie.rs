@@ -21,6 +21,16 @@ pub enum CookieError {
 
     /// Caminho ou domínio inválido.
     InvalidAttribute,
+
+    /// Cabeçalho Cookie inválido.
+    InvalidHeader,
+}
+
+pub(super) fn is_valid_cookie_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
 }
 
 impl std::fmt::Display for CookieError {
@@ -29,6 +39,7 @@ impl std::fmt::Display for CookieError {
             Self::InvalidName => write!(f, "Nome do cookie inválido"),
             Self::InvalidValue => write!(f, "Valor do cookie inválido"),
             Self::InvalidAttribute => write!(f, "Atributo do cookie inválido"),
+            Self::InvalidHeader => write!(f, "Cabeçalho Cookie inválido"),
         }
     }
 }
@@ -54,12 +65,7 @@ impl Cookie {
 
     /// Procura um cookie pelo nome, rejeitando ocorrências duplicadas.
     pub fn get_unique(header: &str, name: &str) -> Result<Option<String>, CookieError> {
-        let valid_name = !name.is_empty()
-            && name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte));
-
-        if !valid_name {
+        if !is_valid_cookie_name(name) {
             return Err(CookieError::InvalidName);
         }
         let mut result = None;

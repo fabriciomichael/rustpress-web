@@ -9,8 +9,9 @@ use std::{
     time::Duration,
 };
 
+use bytes::{Bytes, BytesMut};
+use http_body_util::BodyExt;
 use http_body_util::Full;
-use hyper::body::Bytes;
 use hyper::{Request as HyperRequest, Response as HyperResponse, body::Incoming, http::Method};
 
 use crate::{
@@ -20,6 +21,8 @@ use crate::{
     response::Response,
     session::{Cookie, MemoryStore, SessionConfig, SessionManager},
 };
+
+const MAX_BODY_SIZE: usize = 1024 * 1024;
 
 /// Tipo que representa um handler de rota.
 ///
@@ -35,6 +38,11 @@ type ErrorHandler = Arc<dyn Fn(&HandlerError, &crate::RequestContext) -> Respons
 type Middleware = Arc<dyn Fn(&Request) -> MiddlewareResult + Send + Sync>;
 
 type RouteKey = (Method, String);
+
+enum BodyReadError {
+    TooLarge,
+    Read,
+}
 
 #[derive(Clone)]
 struct SessionState {
@@ -320,9 +328,14 @@ impl Router {
     /// 3. extrai parâmetros da rota;
     /// 4. executa middleware;
     /// 5. chama o handler ou devolve 404.
-    pub(crate) fn handle(&self, request: HyperRequest<Incoming>) -> HyperResponse<Full<Bytes>> {
-        let method = request.method().clone();
-        let path = request.uri().path().to_owned();
+    pub(crate) async fn handle(
+        &self,
+        request: HyperRequest<Incoming>,
+    ) -> HyperResponse<Full<Bytes>> {
+        let (parts, incoming_body) = request.into_parts();
+
+        let method = parts.method.clone();
+        let path = parts.uri.path().to_owned();
 
         let matched = self
             .find_route(&method, &path)
@@ -334,10 +347,11 @@ impl Router {
         };
 
         // Extrai o identificador antes de transferir a requisição HTTP.
-        let session_id = self.extract_session_id(request.headers());
+        let session_id = self.extract_session_id(&parts.headers);
 
-        // Cria o objecto Request e o contexto antes de carregar a sessão.
-        let mut request = Request::new(request, params);
+        // Cria o Request com os metadados e um corpo inicialmente vazio.
+        let inner = HyperRequest::from_parts(parts, Bytes::new());
+        let mut request = Request::new(inner, params);
         let context = request.context();
 
         // Carrega a sessão.
@@ -415,34 +429,53 @@ impl Router {
                 // Guardamos a sessão antes de mover Request para o handler.
                 let session = request.session();
 
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    handler(request, Response::new())
-                })) {
-                    Ok(Ok(response)) => {
-                        self.finalize_or_error_response(response, session, &context)
+                match Self::read_body(incoming_body).await {
+                    Ok(body) => {
+                        request.set_body(body);
+
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            handler(request, Response::new())
+                        })) {
+                            Ok(Ok(response)) => {
+                                self.finalize_or_error_response(response, session, &context)
+                            }
+
+                            Ok(Err(error)) => {
+                                let response = self.handle_error(&error, &context);
+
+                                self.finalize_or_error_response(response, session, &context)
+                            }
+
+                            Err(payload) => {
+                                let message = extract_panic_message(payload.as_ref());
+
+                                let error = HandlerError::with_details(
+                                    "Ocorreu um erro interno no servidor.",
+                                    format!("Panic no handler da rota: {}", message),
+                                );
+
+                                let response = self.handle_error(&error, &context);
+
+                                self.finalize_or_error_response(response, session, &context)
+                            }
+                        }
                     }
 
-                    Ok(Err(error)) => {
-                        let response = self.handle_error(&error, &context);
+                    Err(body_error) => {
+                        let (status, message) = match body_error {
+                            BodyReadError::TooLarge => {
+                                (413, "O corpo do pedido excede o tamanho máximo permitido.")
+                            }
+                            BodyReadError::Read => (400, "Não foi possível ler o corpo do pedido."),
+                        };
 
-                        self.finalize_or_error_response(response, session, &context)
-                    }
-
-                    Err(payload) => {
-                        let message = extract_panic_message(payload.as_ref());
-
-                        let error = HandlerError::with_details(
-                            "Ocorreu um erro interno no servidor.",
-                            format!("Panic no handler da rota: {}", message),
-                        );
-
+                        let error = HandlerError::with_status(status, message);
                         let response = self.handle_error(&error, &context);
 
                         self.finalize_or_error_response(response, session, &context)
                     }
                 }
             }
-
             None if self.path_exists(&path) => {
                 let allow = self
                     .allowed_methods(&path)
@@ -646,6 +679,24 @@ impl Router {
 
     pub(crate) fn set_logger(&mut self, logger: Logger) {
         self.logger = logger;
+    }
+
+    async fn read_body(mut body: Incoming) -> Result<Bytes, BodyReadError> {
+        let mut buffer = BytesMut::new();
+
+        while let Some(frame) = body.frame().await {
+            let frame = frame.map_err(|_| BodyReadError::Read)?;
+
+            if let Some(data) = frame.data_ref() {
+                if buffer.len() + data.len() > MAX_BODY_SIZE {
+                    return Err(BodyReadError::TooLarge);
+                }
+
+                buffer.extend_from_slice(data);
+            }
+        }
+
+        Ok(buffer.freeze())
     }
 }
 

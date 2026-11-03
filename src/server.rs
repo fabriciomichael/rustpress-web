@@ -52,7 +52,7 @@ pub(crate) async fn serve(
                     let path = request.uri().path().to_owned();
                     let start = Instant::now();
 
-                    let response = router.handle(request);
+                    let response = router.handle(request).await;
 
                     logger.info(&format!(
                         "{} {} → {} ({} ms)",

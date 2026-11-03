@@ -1,13 +1,15 @@
 //! Abstracções de leitura dos pedidos HTTP.
 //!
 //! [`Request`] fornece acesso ao método, caminho, cabeçalhos, parâmetros de
-//! rota e query string. O corpo HTTP ainda não é exposto pela API pública.
+//! rota, query string e corpo HTTP.
 
-use hyper::{body::Incoming, header::HeaderValue, http::Method};
-
+use crate::session::{Cookie, CookieError, Session, SessionManager};
+use bytes::Bytes;
+use hyper::{
+    header::{COOKIE, HeaderValue},
+    http::Method,
+};
 use std::sync::{Arc, Mutex};
-
-use crate::session::{Session, SessionManager};
 
 /// Representa uma requisição HTTP recebida pelo servidor.
 ///
@@ -16,7 +18,7 @@ use crate::session::{Session, SessionManager};
 /// extraídos pelo router. A intenção é fornecer uma API simples e idiomática
 /// para os handlers registados nas rotas.
 pub struct Request {
-    inner: hyper::Request<Incoming>,
+    inner: hyper::Request<Bytes>,
     params: Vec<(String, String)>,
     session: Option<Arc<Mutex<Session>>>,
     session_manager: Option<Arc<SessionManager>>,
@@ -25,7 +27,7 @@ pub struct Request {
 impl Request {
     /// Cria uma nova instância de `Request` com a requisição HTTP original e os
     /// parâmetros de rota já resolvidos.
-    pub(crate) fn new(inner: hyper::Request<Incoming>, params: Vec<(String, String)>) -> Self {
+    pub(crate) fn new(inner: hyper::Request<Bytes>, params: Vec<(String, String)>) -> Self {
         Self {
             inner,
             params,
@@ -92,6 +94,39 @@ impl Request {
         self.inner.headers().get(name)
     }
 
+    /// Devolve todos os cookies recebidos na requisição.
+    ///
+    /// Suporta vários cabeçalhos Cookie.
+    /// Retorna erro se algum cabeçalho não puder ser interpretado como texto.
+    pub fn cookies(&self) -> Result<Vec<Cookie>, CookieError> {
+        let mut cookies = Vec::new();
+
+        for header in self.inner.headers().get_all(COOKIE).iter() {
+            let value = header.to_str().map_err(|_| CookieError::InvalidHeader)?;
+
+            cookies.extend(Cookie::parse(value));
+        }
+
+        Ok(cookies)
+    }
+
+    /// Procura um cookie pelo nome.
+    ///
+    /// Retorna Ok(None) quando o cookie não existe.
+    /// Retorna erro quando o cookie é inválido, duplicado
+    /// ou quando um cabeçalho não pode ser interpretado.
+    pub fn cookie(&self, name: &str) -> Result<Option<String>, CookieError> {
+        let headers = self
+            .inner
+            .headers()
+            .get_all(COOKIE)
+            .iter()
+            .map(|header| header.to_str().map_err(|_| CookieError::InvalidHeader))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Cookie::get_unique_from_headers(headers, name)
+    }
+
     /// Devolve o valor de um parâmetro de rota.
     ///
     /// Suporta rotas como `/utilizadores/:id`, permitindo obter o valor do
@@ -136,6 +171,47 @@ impl Request {
                 })
                 .collect(),
         }
+    }
+
+    /// Devolve o corpo HTTP da requisição como bytes.
+    ///
+    /// O conteúdo é devolvido por referência, sem copiar os dados.
+    pub fn body(&self) -> &Bytes {
+        self.inner.body()
+    }
+
+    /// Devolve o corpo HTTP como texto UTF-8.
+    ///
+    /// Retorna um erro quando o corpo contém uma sequência de bytes
+    /// que não representa texto UTF-8 válido.
+    pub fn text(&self) -> Result<&str, std::str::Utf8Error> {
+        std::str::from_utf8(self.body())
+    }
+
+    /// Converte o corpo HTTP de JSON para uma estrutura Rust.
+    ///
+    /// O tipo de destino deve implementar `DeserializeOwned`.
+    /// Retorna um erro quando o conteúdo não for um JSON válido
+    /// ou não corresponder à estrutura esperada.
+    pub fn json<T>(&self) -> Result<T, serde_json::Error>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        serde_json::from_slice(self.body())
+    }
+
+    /// Converte o corpo HTTP para uma lista de campos de formulário.
+    ///
+    /// Desc codifica automaticamente caracteres percent-encoded e espaços.
+    /// Preserva a ordem original e os campos com nomes repetidos.
+    ///
+    /// Exemplo: `nome=Fabricio&interesses=Rust&interesses=PHP`.
+    pub fn form(&self) -> Vec<(String, String)> {
+        form_urlencoded::parse(self.body()).into_owned().collect()
+    }
+
+    pub(crate) fn set_body(&mut self, body: Bytes) {
+        *self.inner.body_mut() = body;
     }
 }
 

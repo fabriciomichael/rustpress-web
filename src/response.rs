@@ -18,7 +18,7 @@ use hyper::{
     Response as HyperResponse,
     body::Bytes,
     header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue},
-    http::StatusCode,
+    http::{StatusCode, Uri},
 };
 
 use crate::TemplateContext;
@@ -284,6 +284,36 @@ impl Response {
         removal_config.max_age = 0;
 
         self.cookie(&cookie, &removal_config)
+    }
+
+    /// Cria uma resposta de redireccionamento HTTP 302.
+    pub fn redirect(path: &str) -> Self {
+        Self::redirect_with_status(302, path)
+    }
+
+    /// Cria uma resposta de redireccionamento com um código HTTP específico.
+    ///
+    /// Aceita apenas 301, 302, 303, 307 e 308.
+    pub fn redirect_with_status(code: u16, path: &str) -> Self {
+        let status = match code {
+            301 => StatusCode::MOVED_PERMANENTLY,
+            302 => StatusCode::FOUND,
+            303 => StatusCode::SEE_OTHER,
+            307 => StatusCode::TEMPORARY_REDIRECT,
+            308 => StatusCode::PERMANENT_REDIRECT,
+            _ => return Self::error(400, "Código de redireccionamento inválido."),
+        };
+
+        let valid_uri = path.parse::<Uri>().is_ok()
+            || (!path.starts_with('/')
+                && !path.contains("://")
+                && format!("http://localhost/{}", path).parse::<Uri>().is_ok());
+
+        if path.is_empty() || path.bytes().any(|byte| byte.is_ascii_control()) || !valid_uri {
+            return Self::error(400, "Destino de redireccionamento inválido.");
+        }
+
+        Self::new().status(status.as_u16()).header("Location", path)
     }
 }
 
@@ -1027,5 +1057,121 @@ mod tests {
         assert_eq!(hyper_response.status(), StatusCode::UNAUTHORIZED);
 
         assert_eq!(hyper_response.headers().get("X-Test").unwrap(), "preserved");
+    }
+
+    #[test]
+    fn redirect_uses_302_by_default() {
+        let response = Response::redirect("/login");
+
+        assert_eq!(response.status, StatusCode::FOUND);
+        assert_eq!(response.headers.get("Location").unwrap(), "/login");
+    }
+
+    #[test]
+    fn redirect_accepts_all_supported_status_codes() {
+        let cases = [
+            (301, StatusCode::MOVED_PERMANENTLY),
+            (302, StatusCode::FOUND),
+            (303, StatusCode::SEE_OTHER),
+            (307, StatusCode::TEMPORARY_REDIRECT),
+            (308, StatusCode::PERMANENT_REDIRECT),
+        ];
+
+        for (code, expected_status) in cases {
+            let response = Response::redirect_with_status(code, "/dashboard");
+
+            assert_eq!(response.status, expected_status);
+            assert_eq!(response.headers.get("Location").unwrap(), "/dashboard");
+        }
+    }
+
+    #[test]
+    fn redirect_rejects_unsupported_status_code() {
+        let response = Response::redirect_with_status(200, "/login");
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(response.headers.get("Location").is_none());
+    }
+
+    #[test]
+    fn redirect_rejects_empty_destination() {
+        let response = Response::redirect("");
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(response.headers.get("Location").is_none());
+    }
+
+    #[test]
+    fn redirect_rejects_control_characters_in_destination() {
+        let response = Response::redirect("/login\r\nX-Injected: true");
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(response.headers.get("Location").is_none());
+    }
+
+    #[test]
+    fn redirect_preserves_location_after_conversion_to_hyper() {
+        let response = Response::redirect("/dashboard");
+
+        let hyper_response = response.into_hyper();
+
+        assert_eq!(hyper_response.status(), StatusCode::FOUND);
+        assert_eq!(
+            hyper_response.headers().get("Location").unwrap(),
+            "/dashboard"
+        );
+    }
+
+    #[test]
+    fn redirect_accepts_external_url() {
+        let response = Response::redirect("https://example.com/login");
+
+        assert_eq!(response.status, StatusCode::FOUND);
+        assert_eq!(
+            response.headers.get("Location").unwrap(),
+            "https://example.com/login"
+        );
+    }
+
+    #[test]
+    fn redirect_accepts_relative_path() {
+        let response = Response::redirect("../login");
+
+        assert_eq!(response.status, StatusCode::FOUND);
+        assert_eq!(response.headers.get("Location").unwrap(), "../login");
+    }
+
+    #[test]
+    fn redirect_accepts_query_parameters() {
+        let response = Response::redirect("/login?next=dashboard");
+
+        assert_eq!(response.status, StatusCode::FOUND);
+        assert_eq!(
+            response.headers.get("Location").unwrap(),
+            "/login?next=dashboard"
+        );
+    }
+
+    #[test]
+    fn redirect_accepts_relative_filename() {
+        let response = Response::redirect("login");
+
+        assert_eq!(response.status, StatusCode::FOUND);
+        assert_eq!(response.headers.get("Location").unwrap(), "login");
+    }
+
+    #[test]
+    fn redirect_accepts_query_only_destination() {
+        let response = Response::redirect("?page=2");
+
+        assert_eq!(response.status, StatusCode::FOUND);
+        assert_eq!(response.headers.get("Location").unwrap(), "?page=2");
+    }
+
+    #[test]
+    fn redirect_rejects_malformed_external_url() {
+        let response = Response::redirect("http://exa mple.com");
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
     }
 }
