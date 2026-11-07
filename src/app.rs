@@ -13,7 +13,7 @@ use crate::{
     logger::{Level, Logger},
     request::Request,
     response::Response,
-    router::Router,
+    router::{Handler, Middleware, Router},
     server,
     session::{CookieError, SessionConfig},
 };
@@ -21,9 +21,192 @@ use crate::{
 use std::{
     fs,
     path::{Component, PathBuf},
+    sync::Arc,
 };
 
 type ServerError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Representa uma rota que ainda não foi registada no Router.
+struct PendingRoute {
+    method: Method,
+    path: String,
+    handler: Handler,
+    middlewares: Vec<Middleware>,
+}
+
+/// Permite configurar um conjunto de rotas com um prefixo comum.
+pub struct RouteGroup {
+    prefix: String,
+    middlewares: Vec<Middleware>,
+    routes: Vec<PendingRoute>,
+}
+
+impl RouteGroup {
+    /// Junta o prefixo do grupo ao caminho da rota.
+    fn join_paths(prefix: &str, path: &str) -> String {
+        let prefix = prefix.trim_end_matches('/');
+        let path = path.trim_start_matches('/');
+
+        if prefix.is_empty() {
+            format!("/{path}")
+        } else if path.is_empty() {
+            format!("{prefix}/")
+        } else {
+            format!("{prefix}/{path}")
+        }
+    }
+
+    /// Regista temporariamente uma rota fallible no grupo.
+    fn add_fallible<F>(&mut self, method: Method, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        let full_path = Self::join_paths(&self.prefix, path);
+
+        Router::validate_route(&full_path)?;
+
+        self.routes.push(PendingRoute {
+            method,
+            path: full_path,
+            handler: Arc::new(handler),
+            middlewares: Vec::new(),
+        });
+
+        Ok(())
+    }
+
+    /// Regista um middleware simples no grupo.
+    ///
+    /// O middleware será aplicado a todas as rotas do grupo.
+    pub fn use_middleware<F>(&mut self, middleware: F)
+    where
+        F: Fn(&Request) -> Option<Response> + Send + Sync + 'static,
+    {
+        self.middlewares
+            .push(Arc::new(move |request| match middleware(request) {
+                Some(response) => MiddlewareResult::Respond(response),
+                None => MiddlewareResult::Next,
+            }));
+    }
+
+    /// Regista um middleware avançado no grupo.
+    ///
+    /// Permite continuar, responder directamente ou devolver um erro.
+    pub fn use_middleware_advanced<F>(&mut self, middleware: F)
+    where
+        F: Fn(&Request) -> MiddlewareResult + Send + Sync + 'static,
+    {
+        self.middlewares.push(Arc::new(middleware));
+    }
+
+    /// Cria um grupo de rotas aninhado.
+    ///
+    /// Os middlewares do grupo exterior serão executados antes
+    /// dos middlewares do grupo interior.
+    pub fn group<F>(&mut self, prefix: &str, configure: F) -> Result<(), String>
+    where
+        F: FnOnce(&mut RouteGroup) -> Result<(), String>,
+    {
+        let child_prefix = Self::join_paths(&self.prefix, prefix);
+
+        Router::validate_route(&child_prefix)?;
+
+        let mut child = RouteGroup {
+            prefix: child_prefix,
+            middlewares: Vec::new(),
+            routes: Vec::new(),
+        };
+
+        configure(&mut child)?;
+
+        child.apply_middlewares();
+
+        self.routes.extend(child.routes);
+
+        Ok(())
+    }
+
+    /// Aplica os middlewares do grupo a todas as rotas registadas.
+    ///
+    /// Os middlewares do grupo são colocados antes dos middlewares
+    /// específicos de cada rota.
+    fn apply_middlewares(&mut self) {
+        for route in &mut self.routes {
+            let mut middlewares = self.middlewares.clone();
+            middlewares.append(&mut route.middlewares);
+            route.middlewares = middlewares;
+        }
+    }
+    /// Regista uma rota GET.
+    pub fn get<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        self.add_fallible(Method::GET, path, handler)
+    }
+
+    /// Regista uma rota POST.
+    pub fn post<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        self.add_fallible(Method::POST, path, handler)
+    }
+
+    /// Regista uma rota PUT.
+    pub fn put<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
+    {
+        self.add_fallible(Method::PUT, path, move |request, response| {
+            Ok(handler(request, response))
+        })
+    }
+
+    /// Regista uma rota PATCH.
+    pub fn patch<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
+    {
+        self.add_fallible(Method::PATCH, path, move |request, response| {
+            Ok(handler(request, response))
+        })
+    }
+
+    /// Regista uma rota DELETE.
+    pub fn delete<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
+    {
+        self.add_fallible(Method::DELETE, path, move |request, response| {
+            Ok(handler(request, response))
+        })
+    }
+
+    /// Regista uma rota PUT com handler que pode devolver um erro.
+    pub fn put_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        self.add_fallible(Method::PUT, path, handler)
+    }
+
+    /// Regista uma rota PATCH com handler que pode devolver um erro.
+    pub fn patch_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        self.add_fallible(Method::PATCH, path, handler)
+    }
+
+    /// Regista uma rota DELETE com handler que pode devolver um erro.
+    pub fn delete_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
+    {
+        self.add_fallible(Method::DELETE, path, handler)
+    }
+}
 
 /// Representa a aplicação web principal do RustPress.
 ///
@@ -35,6 +218,41 @@ pub struct App {
 }
 
 impl App {
+    /// Regista um grupo de rotas com um prefixo comum.
+    ///
+    /// As rotas são registadas apenas se a configuração do grupo
+    /// terminar com sucesso.
+    pub fn group<F>(&mut self, prefix: &str, configure: F) -> Result<(), String>
+    where
+        F: FnOnce(&mut RouteGroup) -> Result<(), String>,
+    {
+        let normalized_prefix = if prefix.starts_with('/') {
+            prefix.to_owned()
+        } else {
+            format!("/{prefix}")
+        };
+
+        Router::validate_route(&normalized_prefix)?;
+
+        let mut group = RouteGroup {
+            prefix: normalized_prefix.trim_end_matches('/').to_owned(),
+            middlewares: Vec::new(),
+            routes: Vec::new(),
+        };
+
+        configure(&mut group)?;
+
+        group.apply_middlewares();
+
+        let routes = group
+            .routes
+            .into_iter()
+            .map(|route| (route.method, route.path, route.handler, route.middlewares))
+            .collect();
+
+        self.router.add_group_routes(routes)
+    }
+
     /// Cria uma nova instância da aplicação.
     ///
     /// Normalmente é o primeiro passo antes de registar rotas e middleware.

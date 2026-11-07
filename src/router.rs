@@ -4,7 +4,7 @@
 //! de caminho, extrai parâmetros dinâmicos, executa middlewares e encaminha
 //! erros para o handler global configurado em [`crate::App`].
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -28,14 +28,22 @@ const MAX_BODY_SIZE: usize = 1024 * 1024;
 ///
 /// Um handler recebe a requisição processada pelo framework e a resposta em
 /// construção e devolve a resposta final a enviar ao cliente.
-type Handler = Arc<dyn Fn(Request, Response) -> Result<Response, HandlerError> + Send + Sync>;
-type MatchedRoute = (String, Handler, Vec<(String, String)>);
+pub(crate) type Handler =
+    Arc<dyn Fn(Request, Response) -> Result<Response, HandlerError> + Send + Sync>;
+
+#[derive(Clone)]
+struct RouteEntry {
+    handler: Handler,
+    middlewares: Vec<Middleware>,
+}
+
+type MatchedRoute = (String, RouteEntry, Vec<(String, String)>);
 
 /// Tipo que representa o handler global de erros.
 type ErrorHandler = Arc<dyn Fn(&HandlerError, &crate::RequestContext) -> Response + Send + Sync>;
 
 /// Tipo que representa um middleware da cadeia de execução.
-type Middleware = Arc<dyn Fn(&Request) -> MiddlewareResult + Send + Sync>;
+pub(crate) type Middleware = Arc<dyn Fn(&Request) -> MiddlewareResult + Send + Sync>;
 
 type RouteKey = (Method, String);
 
@@ -57,7 +65,7 @@ struct SessionState {
 /// é executada no momento em que cada pedido HTTP chega ao servidor.
 #[derive(Clone, Default)]
 pub(crate) struct Router {
-    routes: HashMap<RouteKey, Handler>,
+    routes: HashMap<RouteKey, RouteEntry>,
     middlewares: Vec<Middleware>,
     error_handler: Option<ErrorHandler>,
 
@@ -108,8 +116,51 @@ impl Router {
     {
         Self::validate_route(path)?;
 
-        self.routes
-            .insert((method, path.to_owned()), Arc::new(handler));
+        self.routes.insert(
+            (method, path.to_owned()),
+            RouteEntry {
+                handler: Arc::new(handler),
+                middlewares: Vec::new(),
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Regista um conjunto de rotas de grupo de forma atómica.
+    pub(crate) fn add_group_routes(
+        &mut self,
+        routes: Vec<(Method, String, Handler, Vec<Middleware>)>,
+    ) -> Result<(), String> {
+        let mut pending_keys = HashSet::with_capacity(routes.len());
+
+        // Primeira fase: validar todas as rotas sem modificar o Router.
+        for (method, path, _, _) in &routes {
+            Self::validate_route(path)?;
+
+            let key = (method.clone(), path.clone());
+
+            if self.routes.contains_key(&key) {
+                return Err(format!(
+                    "Já existe uma rota registada para o método {method} e caminho '{path}'."
+                ));
+            }
+
+            if !pending_keys.insert(key) {
+                return Err(format!("A rota {method} '{path}' está duplicada no grupo."));
+            }
+        }
+
+        // Segunda fase: registar todas as rotas.
+        for (method, path, handler, middlewares) in routes {
+            self.routes.insert(
+                (method, path),
+                RouteEntry {
+                    handler,
+                    middlewares,
+                },
+            );
+        }
 
         Ok(())
     }
@@ -339,7 +390,7 @@ impl Router {
 
         let matched = self
             .find_route(&method, &path)
-            .map(|(_, handler, params)| (handler, params));
+            .map(|(_, entry, params)| (entry, params));
 
         let params = match &matched {
             Some((_, params)) => params.clone(),
@@ -409,7 +460,12 @@ impl Router {
             }
         }
 
-        for middleware in &self.middlewares {
+        let route_middlewares = matched
+            .as_ref()
+            .map(|(entry, _)| entry.middlewares.as_slice())
+            .unwrap_or(&[]);
+
+        for middleware in self.middlewares.iter().chain(route_middlewares.iter()) {
             let middleware_result =
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     middleware(&request)
@@ -456,7 +512,8 @@ impl Router {
         }
 
         let mut response = match matched {
-            Some((handler, _)) => {
+            Some((entry, _)) => {
+                let handler = entry.handler;
                 // Guardamos a sessão antes de mover Request para o handler.
                 let session = request.session();
 
@@ -540,7 +597,7 @@ impl Router {
         self.middlewares.push(Arc::new(middleware));
     }
 
-    fn validate_route(path: &str) -> Result<(), String> {
+    pub(crate) fn validate_route(path: &str) -> Result<(), String> {
         if path.is_empty() {
             return Err("O caminho da rota não pode estar vazio.".to_string());
         }
@@ -956,19 +1013,18 @@ mod tests {
             })
             .expect("A rota HEAD deveria ser registada");
 
-        let (_, handler, _) = router
+        let (_, entry, _) = router
             .find_route(&Method::HEAD, "/utilizadores")
             .expect("Deveria encontrar a rota HEAD");
 
-        // O Handler é um Arc. Podemos comparar a identidade do handler
-        // seleccionado com o handler registado para HEAD.
-        let head_handler = router
+        // Compara a identidade dos handlers registados.
+        let head_entry = router
             .routes
             .get(&(Method::HEAD, "/utilizadores".to_owned()))
             .expect("A rota HEAD deveria existir");
 
         assert!(
-            std::sync::Arc::ptr_eq(&handler, head_handler),
+            std::sync::Arc::ptr_eq(&entry.handler, &head_entry.handler),
             "O router deveria preferir o handler HEAD explícito"
         );
     }

@@ -45,7 +45,7 @@ mod server;
 pub mod session;
 mod template;
 
-pub use app::App;
+pub use app::{App, RouteGroup};
 pub use handler_error::HandlerError;
 pub use logger::{Level, Logger};
 pub use middleware::{AuthMiddleware, CsrfMiddleware, MiddlewareResult, RoleMiddleware};

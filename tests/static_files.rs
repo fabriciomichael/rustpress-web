@@ -2,12 +2,15 @@ use std::{
     fs,
     io::{Read, Write},
     net::TcpStream,
+    sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use rustpress_web::{App, HandlerError, Request, Response};
 use tokio::net::TcpListener;
+
+static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 fn request_with_app(app: App, method: &str, path: &str) -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
@@ -73,7 +76,12 @@ fn request_static_file_with_method(method: &str, path: &str) -> String {
         .expect("O relógio do sistema está incorrecto")
         .as_nanos();
 
-    let directory = std::env::temp_dir().join(format!("rustpress-static-files-{unique}"));
+    let counter = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+
+    let directory = std::env::temp_dir().join(format!(
+        "rustpress-static-files-{}-{unique}-{counter}",
+        std::process::id()
+    ));
 
     fs::create_dir_all(directory.join("css")).expect("Não foi possível criar a pasta temporária");
 
