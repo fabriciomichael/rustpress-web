@@ -1,69 +1,24 @@
-# Contribuir para o RustPress
+# Contribuir para o RustPress Web
 
-Obrigado por considerar contribuir para o RustPress. Este documento resume a forma recomendada de colaborar no projecto.
+Obrigado pelo interesse em contribuir para o RustPress Web.
 
-## Requisitos
+Este documento apresenta as orientações para configurar o ambiente de desenvolvimento, modificar o código, executar testes e submeter contribuições ao projecto.
 
-- Rust estável
-- Cargo
-- Git
-- Editor ou IDE com suporte a Rust (VS Code + rust-analyzer recomendado)
+## 1. Requisitos
 
-## Configuração local
+Para contribuir para o projecto, é necessário ter:
 
-```bash
-git https://github.com/fabriciomichael/rustpress-web.git
-cd rustpress-web
-cargo build
-cargo test
-```
+- Rust estável.
+- Cargo.
+- Git.
+- Editor ou IDE com suporte a Rust.
+- Conhecimentos básicos de Rust e desenvolvimento web.
 
-## Fluxo de trabalho recomendado
+Recomenda-se a utilização do Visual Studio Code com a extensão rust-analyzer.
 
-1. Crie uma branch para a funcionalidade ou correção.
-2. Faça alterações pequenas e focadas.
-3. Atualize a documentação sempre que a API mudar.
-4. Execute testes e validações antes de submeter.
-5. Abra um pull request com uma descrição objetiva.
+## 2. Configuração do ambiente
 
-## Normas de código
-
-- Mantenha a API simples e consistente com o estilo do Rust.
-- Prefira nomes claros e expressivos.
-- Evite complexidade desnecessária.
-- Documente funções públicas com comentários curtos e úteis.
-- Não introduza dependências desnecessárias.
-
-## Testes
-
-Antes de submeter uma alteração:
+Comece por clonar o repositório:
 
 ```bash
-cargo test
-```
-
-Se estiver a desenvolver novos exemplos:
-
-```bash
-cargo run --example basic
-```
-
-## Pull requests
-
-Os pull requests devem incluir:
-
-- descrição do problema ou funcionalidade;
-- resumo das alterações;
-- qualquer impacto de compatibilidade;
-- instruções de validação.
-
-## Boas práticas
-
-- Mantenha o foco no problema.
-- Descreva claramente mudanças de comportamento.
-- Documente qualquer mudança na API pública.
-- Use commits pequenos e semânticos.
-
-## Suporte e discussão
-
-Use as issues e pull requests do repositório para propor melhorias, reportar bugs e discutir alterações de arquitetura.
+git clone https://github.com/fabriciomichael/rustpress-web.git

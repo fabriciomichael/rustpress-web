@@ -1,98 +1,66 @@
-# Arquitetura do RustPress
+# Arquitectura do RustPress Web
 
-Este documento descreve a arquitetura interna do projecto e o papel dos seus principais módulos.
+Este documento descreve a arquitectura interna do RustPress Web, os seus principais componentes e o fluxo de processamento dos pedidos HTTP.
 
-## Visão geral
+## 1. Visão geral
 
-O RustPress foi desenhado como um framework HTTP simples, estruturado em torno de três blocos principais:
+O RustPress Web é um framework HTTP assíncrono e minimalista para Rust, construído sobre Hyper 1 e Tokio.
 
-- definição da aplicação;
-- gestão de rotas e middleware;
-- servidor HTTP assíncrono.
+A arquitectura organiza-se em torno de uma API pública para definição da aplicação, processamento de pedidos, construção de respostas, middleware, sessões, templates, logging e tratamento de erros.
 
-## Estrutura
+Os módulos `router` e `server` são internos e não fazem parte da API pública.
 
-### `App`
+## 2. Organização dos módulos
 
-A estrutura `App` representa a aplicação web. É o ponto de entrada público e expõe métodos como `get`, `post`, `put`, `patch`, `delete` e `use_middleware`.
+| Módulo | Responsabilidade |
+|---|---|
+| `app` | Define a aplicação e disponibiliza os métodos de configuração e registo de rotas. |
+| `request` | Encapsula os dados do pedido HTTP e disponibiliza métodos para consultar cabeçalhos, parâmetros, corpo e sessões. |
+| `response` | Permite construir respostas HTTP, definir status, cabeçalhos, cookies, redireccionamentos e conteúdo. |
+| `router` | Gere internamente as rotas, os middlewares, as sessões e o tratamento de erros. |
+| `middleware` | Implementa middlewares de autenticação, autorização por funções e protecção CSRF. |
+| `handler_error` | Define a estrutura de erros utilizados pelos handlers e pelo sistema de tratamento de erros. |
+| `session` | Gere sessões, cookies, configuração, armazenamento e ciclo de vida das sessões. |
+| `template` | Disponibiliza o motor de templates, variáveis, condições, ciclos, layouts e partials. |
+| `logger` | Disponibiliza os níveis e mecanismos de registo de eventos. |
+| `server` | Implementa internamente o servidor TCP assíncrono e a integração com Hyper. |
 
-A `App` contém uma instância de `Router`, que é responsável pela associação entre método HTTP, caminho e callback.
+## 3. Componente App
 
-### `Request`
+A estrutura `App` representa a aplicação web e constitui o principal ponto de entrada da API pública.
 
-`Request` encapsula a requisição recebida pelo Hyper e oferece acesso a:
+É responsável por registar rotas e configurar os recursos disponibilizados pelo framework.
 
-- `method()`
-- `path()`
-- `header()`
-- `param()`
-- `query()`
+Entre os seus métodos encontram-se:
 
-A informação de parâmetros da rota é armazenada em `Vec<(String, String)>`, permitindo extração com base em nomes de parâmetro.
+- `App::new()` — cria uma nova aplicação.
+- `get()` e `post()` — registam rotas HTTP.
+- `put()`, `patch()` e `delete()` — registam rotas para os respectivos métodos HTTP.
+- `put_fallible()`, `patch_fallible()` e `delete_fallible()` — registam handlers que podem devolver erros.
+- `use_middleware()` — regista middleware.
+- `use_middleware_advanced()` — regista middleware com controlo avançado de execução.
+- `use_sessions()` — activa a gestão de sessões.
+- `set_error_handler()` — configura o handler global de erros.
+- `set_log_level()` — configura o nível de logging.
+- `static_files()` — configura a disponibilização de ficheiros estáticos.
+- `listen()` — inicia o servidor numa determinada porta ou endereço.
+- `serve_listener()` — permite servir a aplicação através de um `TcpListener` existente.
 
-### `Response`
+A estrutura `App` utiliza internamente o `Router` para gerir o processamento dos pedidos.
 
-`Response` abstrai a mensagem de resposta HTTP para a aplicação. Permite manipular:
+## 4. Gestão de rotas
 
-- status HTTP;
-- corpo textual;
-- headers;
-- conteúdo JSON.
+O `Router` é um componente interno responsável por associar os métodos e caminhos HTTP aos respectivos handlers.
 
-Antes de ser enviada ao cliente, a resposta é convertida para o tipo `hyper::Response`.
+As rotas são armazenadas internamente através de uma estrutura baseada no método HTTP e no caminho.
 
-### `Router`
+O framework suporta parâmetros dinâmicos, utilizando a sintaxe `:param`.
 
-O `Router` guarda todas as rotas num `HashMap` indexado por `(Method, String)`. Cada rota tem uma função handler que recebe `Request` e `Response` e devolve `Response`.
+Exemplo:
 
-A correspondência de rotas faz-se por:
+```rust
+app.get("/users/:id", |req, _res| {
+    let id = req.param("id").unwrap_or("unknown");
 
-- comparação do método HTTP;
-- divisão do caminho em segmentos;
-- matching por igualdade literal ou por marcadores `:param`.
-
-Quando um caminho coincidente é encontrado, os parâmetros dinâmicos são extratos e passados ao handler.
-
-### Middleware
-
-O middleware é armazenado numa lista e executado antes do handler final. Se uma função de middleware devolver `Some(Response)`, a resposta é interrompida e enviada imediatamente.
-
-Esta abordagem permite:
-
-- autenticação;
-- validação de acesso;
-- logging de pedidos;
-- manipulação simples de erros antes de o pedido chegar à rota.
-
-### `server`
-
-O módulo `server` cria um `TcpListener`, aceita ligações e usa o serviço `Hyper` para processar cada pedido.
-
-Cada conexão é tratada em uma task Tokio separada, permitindo que o servidor mantenha um comportamento assíncrono e concorrente.
-
-## Ciclo de execução
-
-1. A aplicação é criada com `App::new()`.
-2. As rotas e middleware são registados.
-3. `listen` inicia o `TcpListener`.
-4. O servidor aceita uma nova conexão.
-5. O `Router` resolve a rota pretendida.
-6. O middleware executa-se, se existir.
-7. O handler correspondente gera uma resposta.
-8. A resposta é convertida para Hyper e enviada ao cliente.
-
-## Pontos de extensão
-
-O projecto está preparado para receber extensões em áreas como:
-
-- agrupamento de rotas por módulos;
-- gestão de erros centralizada;
-- suportes de templates e views;
-- validação de payloads JSON;
-- middlewares em cadeia com controlo de execução.
-
-## Considerações de design
-
-O design actual prioriza simplicidade, clareza e aprendizagem. A implementação mantém uma API mínima, permitindo que o project seja fácil de estudar e evoluir sem uma camada adicional muito pesada.
-
-Em termos de arquitetura, o projecto está intencionalmente próximo do modelo clássico de framework web minimalista: rotas + handler + resposta.
+    Response::new().send(format!("User: {id}"))
+});

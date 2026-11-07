@@ -1,10 +1,11 @@
 use rustpress_web::{
-    App, AuthMiddleware, MiddlewareResult, Request, Response, RoleMiddleware,
+    App, AuthMiddleware, CsrfMiddleware, MiddlewareResult, Request, Response, RoleMiddleware,
     session::SessionConfig,
 };
 use std::{
     io::{Read, Write},
     net::TcpStream,
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
@@ -342,6 +343,116 @@ fn request_then_with_cookie(
         .expect("A primeira resposta não enviou o cookie da sessão");
 
     let second_response = send_request(&address, second_method, second_path, Some(cookie));
+
+    (first_response, second_response)
+}
+
+fn request_then_post_with_cookie<F>(
+    app: App,
+    first_path: &str,
+    second_path: &str,
+    make_request: F,
+) -> (String, String)
+where
+    F: FnOnce(&str) -> (String, Option<String>),
+{
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("Não foi possível reservar uma porta");
+
+    listener.set_nonblocking(true).unwrap();
+
+    let address = listener.local_addr().unwrap();
+
+    let _server_thread = thread::spawn(move || {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        runtime.block_on(async move {
+            let listener = TcpListener::from_std(listener).unwrap();
+            app.serve_listener(listener).await.unwrap();
+        });
+    });
+
+    fn send_request(
+        address: &std::net::SocketAddr,
+        method: &str,
+        path: &str,
+        cookie: Option<&str>,
+        body: Option<&str>,
+        csrf_header: Option<&str>,
+    ) -> String {
+        let deadline = Instant::now() + Duration::from_secs(10);
+
+        loop {
+            if Instant::now() >= deadline {
+                panic!("O servidor não ficou disponível a tempo");
+            }
+
+            if let Ok(mut stream) = TcpStream::connect_timeout(address, Duration::from_millis(200))
+            {
+                let mut request = format!(
+                    "{method} {path} HTTP/1.1\r\n\
+                     Host: {address}\r\n\
+                     Connection: close\r\n"
+                );
+
+                if let Some(cookie) = cookie {
+                    request.push_str(&format!("Cookie: {cookie}\r\n"));
+                }
+
+                if let Some(token) = csrf_header {
+                    request.push_str(&format!("X-CSRF-Token: {token}\r\n"));
+                }
+
+                if let Some(body) = body {
+                    request.push_str(&format!(
+                        "Content-Type: application/x-www-form-urlencoded\r\n\
+                         Content-Length: {}\r\n",
+                        body.len()
+                    ));
+                }
+
+                request.push_str("\r\n");
+
+                stream.write_all(request.as_bytes()).unwrap();
+
+                if let Some(body) = body {
+                    stream.write_all(body.as_bytes()).unwrap();
+                }
+
+                let mut response = String::new();
+                stream.read_to_string(&mut response).unwrap();
+
+                return response;
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    // Primeira requisição: obter a sessão e o token CSRF.
+    let first_response = send_request(&address, "GET", first_path, None, None, None);
+
+    let cookie = first_response
+        .lines()
+        .find(|line| line.to_ascii_lowercase().starts_with("set-cookie:"))
+        .and_then(|line| line.split_once(':'))
+        .map(|(_, value)| value.trim())
+        .and_then(|value| value.split(';').next())
+        .expect("A primeira resposta não enviou o cookie da sessão");
+
+    let token = first_response.split("\r\n\r\n").nth(1).unwrap_or("").trim();
+
+    let (body, header) = make_request(token);
+
+    // Segunda requisição: enviar o formulário com a mesma sessão.
+    let second_response = send_request(
+        &address,
+        "POST",
+        second_path,
+        Some(cookie),
+        Some(&body),
+        header.as_deref(),
+    );
 
     (first_response, second_response)
 }
@@ -1321,4 +1432,141 @@ fn role_middleware_rejects_unauthenticated_user() {
     let (_, admin_response) = request_then_with_cookie(app, "POST", "/login", "GET", "/admin");
 
     assert!(admin_response.contains("401 Unauthorized"));
+}
+
+#[test]
+fn csrf_accepts_valid_form_token_through_router() {
+    let mut app = App::new();
+    app.use_sessions(SessionConfig::default()).unwrap();
+
+    let csrf = Arc::new(CsrfMiddleware::new());
+    let middleware = Arc::clone(&csrf);
+
+    app.use_middleware_advanced(move |request| middleware.handle(request));
+
+    let csrf_for_get = Arc::clone(&csrf);
+
+    app.get("/csrf", move |request, response| {
+        let token = csrf_for_get
+            .token(&request)?
+            .expect("O token CSRF não foi gerado");
+
+        Ok(response.send(token))
+    })
+    .unwrap();
+
+    app.post("/csrf", |_request, response| {
+        Ok(response.send("POST aceite"))
+    })
+    .unwrap();
+
+    let (get_response, post_response) =
+        request_then_post_with_cookie(app, "/csrf", "/csrf", |token| {
+            (format!("_csrf={token}"), None)
+        });
+
+    assert!(get_response.contains("200 OK"));
+    assert!(post_response.contains("200 OK"));
+    assert!(post_response.contains("POST aceite"));
+}
+
+#[test]
+fn csrf_rejects_invalid_form_token_through_router() {
+    let mut app = App::new();
+    app.use_sessions(SessionConfig::default()).unwrap();
+
+    let csrf = Arc::new(CsrfMiddleware::new());
+    let middleware = Arc::clone(&csrf);
+
+    app.use_middleware_advanced(move |request| middleware.handle(request));
+
+    let csrf_for_get = Arc::clone(&csrf);
+
+    app.get("/csrf", move |request, response| {
+        let token = csrf_for_get
+            .token(&request)?
+            .expect("O token CSRF não foi gerado");
+
+        Ok(response.send(token))
+    })
+    .unwrap();
+
+    app.post("/csrf", |_request, response| {
+        Ok(response.send("POST aceite"))
+    })
+    .unwrap();
+
+    let (_, post_response) = request_then_post_with_cookie(app, "/csrf", "/csrf", |_token| {
+        ("_csrf=token-invalido".to_string(), None)
+    });
+
+    assert!(post_response.contains("403"));
+    assert!(!post_response.contains("POST aceite"));
+}
+
+#[test]
+fn csrf_accepts_valid_header_token_through_router() {
+    let mut app = App::new();
+    app.use_sessions(SessionConfig::default()).unwrap();
+
+    let csrf = Arc::new(CsrfMiddleware::new());
+    let middleware = Arc::clone(&csrf);
+
+    app.use_middleware_advanced(move |request| middleware.handle(request));
+
+    let csrf_for_get = Arc::clone(&csrf);
+
+    app.get("/csrf", move |request, response| {
+        let token = csrf_for_get
+            .token(&request)?
+            .expect("O token CSRF não foi gerado");
+
+        Ok(response.send(token))
+    })
+    .unwrap();
+
+    app.post("/csrf", |_request, response| {
+        Ok(response.send("POST aceite pelo cabeçalho"))
+    })
+    .unwrap();
+
+    let (_, post_response) = request_then_post_with_cookie(app, "/csrf", "/csrf", |token| {
+        (String::new(), Some(token.to_string()))
+    });
+
+    assert!(post_response.contains("200 OK"));
+    assert!(post_response.contains("POST aceite pelo cabeçalho"));
+}
+
+#[test]
+fn csrf_rejects_post_without_token_through_router() {
+    let mut app = App::new();
+    app.use_sessions(SessionConfig::default()).unwrap();
+
+    let csrf = Arc::new(CsrfMiddleware::new());
+    let middleware = Arc::clone(&csrf);
+
+    app.use_middleware_advanced(move |request| middleware.handle(request));
+
+    let csrf_for_get = Arc::clone(&csrf);
+
+    app.get("/csrf", move |request, response| {
+        let token = csrf_for_get
+            .token(&request)?
+            .expect("O token CSRF não foi gerado");
+
+        Ok(response.send(token))
+    })
+    .unwrap();
+
+    app.post("/csrf", |_request, response| {
+        Ok(response.send("POST aceite"))
+    })
+    .unwrap();
+
+    let (_, post_response) =
+        request_then_post_with_cookie(app, "/csrf", "/csrf", |_token| (String::new(), None));
+
+    assert!(post_response.contains("403"));
+    assert!(!post_response.contains("POST aceite"));
 }

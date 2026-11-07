@@ -56,7 +56,7 @@ impl Cookie {
     }
 
     /// Procura um cookie pelo nome num cabeçalho HTTP `Cookie`.
-    pub fn get<'a>(header: &'a str, name: &str) -> Option<String> {
+    pub fn get(header: &str, name: &str) -> Option<String> {
         Self::parse(header)
             .into_iter()
             .find(|cookie| cookie.name == name)

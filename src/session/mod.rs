@@ -10,6 +10,9 @@ pub mod config;
 pub mod store;
 
 /// Gestão dos dados individuais de uma sessão.
+///
+/// Mantém o caminho público `session::session` por compatibilidade.
+#[allow(clippy::module_inception)]
 pub mod session;
 
 /// Gestão centralizada do ciclo de vida das sessões.

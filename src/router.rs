@@ -378,6 +378,37 @@ impl Router {
             request.set_session_manager(Arc::clone(&session.manager));
         }
 
+        // Lemos o corpo antes dos middlewares para permitir que eles
+        // analisem dados da requisição, como tokens CSRF enviados por formulário.
+        if matched.is_some() {
+            match Self::read_body(incoming_body).await {
+                Ok(body) => {
+                    request.set_body(body);
+                }
+
+                Err(body_error) => {
+                    let (status, message) = match body_error {
+                        BodyReadError::TooLarge => {
+                            (413, "O corpo do pedido excede o tamanho máximo permitido.")
+                        }
+                        BodyReadError::Read => (400, "Não foi possível ler o corpo do pedido."),
+                    };
+
+                    let error = HandlerError::with_status(status, message);
+                    let response = self.handle_error(&error, &context);
+
+                    let mut response =
+                        self.finalize_or_error_response(response, request.session(), &context);
+
+                    if method == Method::HEAD {
+                        *response.body_mut() = Full::new(Bytes::new());
+                    }
+
+                    return response;
+                }
+            }
+        }
+
         for middleware in &self.middlewares {
             let middleware_result =
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -429,47 +460,27 @@ impl Router {
                 // Guardamos a sessão antes de mover Request para o handler.
                 let session = request.session();
 
-                match Self::read_body(incoming_body).await {
-                    Ok(body) => {
-                        request.set_body(body);
-
-                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            handler(request, Response::new())
-                        })) {
-                            Ok(Ok(response)) => {
-                                self.finalize_or_error_response(response, session, &context)
-                            }
-
-                            Ok(Err(error)) => {
-                                let response = self.handle_error(&error, &context);
-
-                                self.finalize_or_error_response(response, session, &context)
-                            }
-
-                            Err(payload) => {
-                                let message = extract_panic_message(payload.as_ref());
-
-                                let error = HandlerError::with_details(
-                                    "Ocorreu um erro interno no servidor.",
-                                    format!("Panic no handler da rota: {}", message),
-                                );
-
-                                let response = self.handle_error(&error, &context);
-
-                                self.finalize_or_error_response(response, session, &context)
-                            }
-                        }
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handler(request, Response::new())
+                })) {
+                    Ok(Ok(response)) => {
+                        self.finalize_or_error_response(response, session, &context)
                     }
 
-                    Err(body_error) => {
-                        let (status, message) = match body_error {
-                            BodyReadError::TooLarge => {
-                                (413, "O corpo do pedido excede o tamanho máximo permitido.")
-                            }
-                            BodyReadError::Read => (400, "Não foi possível ler o corpo do pedido."),
-                        };
+                    Ok(Err(error)) => {
+                        let response = self.handle_error(&error, &context);
 
-                        let error = HandlerError::with_status(status, message);
+                        self.finalize_or_error_response(response, session, &context)
+                    }
+
+                    Err(payload) => {
+                        let message = extract_panic_message(payload.as_ref());
+
+                        let error = HandlerError::with_details(
+                            "Ocorreu um erro interno no servidor.",
+                            format!("Panic no handler da rota: {}", message),
+                        );
+
                         let response = self.handle_error(&error, &context);
 
                         self.finalize_or_error_response(response, session, &context)
@@ -573,7 +584,7 @@ impl Router {
     fn extract_session_id(&self, headers: &http::HeaderMap) -> Option<String> {
         let config = &self.session.as_ref()?.config;
 
-        let session_id = headers
+        headers
             .get_all(hyper::header::COOKIE)
             .iter()
             .map(|header| {
@@ -584,9 +595,7 @@ impl Router {
             .collect::<Result<Vec<_>, _>>()
             .and_then(|headers| Cookie::get_unique_from_headers(headers, &config.cookie_name))
             .ok()
-            .flatten();
-
-        session_id
+            .flatten()
     }
 
     /// Recupera a sessão associada a um pedido HTTP.
@@ -606,7 +615,7 @@ impl Router {
         &self,
         mut response: Response,
         session: Option<Arc<Mutex<crate::session::Session>>>,
-    ) -> Result<HyperResponse<Full<Bytes>>, (crate::session::SessionError, Response)> {
+    ) -> Result<HyperResponse<Full<Bytes>>, Box<(crate::session::SessionError, Response)>> {
         let Some(session) = session else {
             return Ok(response.into_hyper());
         };
@@ -614,14 +623,20 @@ impl Router {
         let session = match session.lock() {
             Ok(session) => session,
             Err(_) => {
-                return Err((crate::session::SessionError::LockPoisoned, response));
+                return Err(Box::new((
+                    crate::session::SessionError::LockPoisoned,
+                    response,
+                )));
             }
         };
 
         let session_state = match self.session.as_ref() {
             Some(session_state) => session_state,
             None => {
-                return Err((crate::session::SessionError::Configuration, response));
+                return Err(Box::new((
+                    crate::session::SessionError::Configuration,
+                    response,
+                )));
             }
         };
 
@@ -630,11 +645,11 @@ impl Router {
 
         if session.is_destroyed() {
             if let Err(error) = manager.destroy(session.id()) {
-                return Err((error.into(), response));
+                return Err(Box::new((error.into(), response)));
             }
 
             if let Err(error) = response.remove_cookie(&config.cookie_name, config) {
-                return Err((error.into(), response));
+                return Err(Box::new((error.into(), response)));
             }
 
             return Ok(response.into_hyper());
@@ -644,11 +659,11 @@ impl Router {
             let cookie = Cookie::new(config.cookie_name.clone(), session.id().to_string());
 
             if let Err(error) = response.cookie(&cookie, config) {
-                return Err((error.into(), response));
+                return Err(Box::new((error.into(), response)));
             }
 
             if let Err(error) = manager.save(&session) {
-                return Err((error.into(), response));
+                return Err(Box::new((error.into(), response)));
             }
         }
 
@@ -664,7 +679,8 @@ impl Router {
         match self.finalize_response(response, session) {
             Ok(response) => response,
 
-            Err((error, _response)) => {
+            Err(error) => {
+                let (error, _response) = *error;
                 let handler_error = HandlerError::with_status_and_details(
                     500,
                     "Ocorreu um erro interno no servidor.",
@@ -688,7 +704,7 @@ impl Router {
             let frame = frame.map_err(|_| BodyReadError::Read)?;
 
             if let Some(data) = frame.data_ref() {
-                if buffer.len() + data.len() > MAX_BODY_SIZE {
+                if data.len() > MAX_BODY_SIZE.saturating_sub(buffer.len()) {
                     return Err(BodyReadError::TooLarge);
                 }
 

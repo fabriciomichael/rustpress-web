@@ -48,7 +48,7 @@ mod template;
 pub use app::App;
 pub use handler_error::HandlerError;
 pub use logger::{Level, Logger};
-pub use middleware::{AuthMiddleware, MiddlewareResult, RoleMiddleware};
+pub use middleware::{AuthMiddleware, CsrfMiddleware, MiddlewareResult, RoleMiddleware};
 pub use request::{Request, RequestContext};
 pub use response::Response;
 pub use template::{TemplateContext, TemplateError};

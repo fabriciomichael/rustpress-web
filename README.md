@@ -25,18 +25,20 @@ O projecto procura combinar uma interface familiar para quem conhece o Express.j
 ## Funcionalidades actuais
 
 - **Servidor HTTP assíncrono:** Hyper 1 e Tokio.
-- **Rotas:** GET, POST, PUT, PATCH e DELETE.
+- **Rotas HTTP:** GET, POST, PUT, PATCH e DELETE.
 - **Parâmetros dinâmicos:** padrões como `/utilizadores/:id`.
 - **Query strings:** consulta de parâmetros como `?pagina=2&limite=10`.
-- **Request e Response:** tipos próprios para trabalhar com pedidos e respostas HTTP.
+- **Request:** leitura do corpo, texto, JSON, formulários URL-encoded, headers, cookies, parâmetros e sessões.
+- **Response:** respostas em texto, HTML, JSON e conteúdo binário, headers, códigos de estado, cookies e redireccionamentos.
 - **Middleware:** middleware simples e cadeia avançada com continuação, resposta imediata ou erro.
-- **Tratamento de erros:** erros devolvidos por handlers, handler global e páginas de erro 404, 405 e 500.
-- **Respostas:** texto, HTML, JSON, conteúdo binário, headers e códigos de estado.
+- **Autenticação e permissões:** middleware de autenticação e controlo de funções ou papéis dos utilizadores.
+- **Protecção CSRF:** validação de tokens através de headers ou formulários.
+- **Sessões:** gestão de sessões, armazenamento em memória, regeneração e destruição de sessões.
+- **Tratamento global de erros:** handler global e páginas de erro 404, 405 e 500.
 - **Ficheiros estáticos:** publicação de CSS, JavaScript, imagens e outros ficheiros a partir de uma pasta configurada.
 - **Templates HTML:** variáveis, condições, ciclos, layouts e partials.
 - **Logger:** níveis DEBUG, INFO, WARN e ERROR, com saída colorida e registo de pedidos do servidor.
 - **Testes:** testes unitários e testes de integração para funcionalidades existentes.
-
 ## Requisitos
 
 - Rust estável com suporte à edição **2024**.
@@ -66,53 +68,58 @@ cargo run --example basic
 ```
 
 
-## OU
+## Criar um projecto com RustPress CLI
 
-Instala o RustPress Web com RustPress CLI:
+O RustPress CLI é a ferramenta oficial para criar a estrutura inicial de aplicações que utilizam o RustPress Web.
+
+### Instalação
+
+Instala o CLI através do Cargo:
 
 ```bash
 cargo install rustpress-cli
 ```
 
-Depois da instalação, o comando `rustpress` estará disponível no terminal.
-
-## Utilização
-
 ### Criar um projecto
+
+Depois da instalação, cria um novo projecto:
 
 ```bash
 rustpress new minha_app
 ```
 
-### Entrar no projecto
+### Executar a aplicação
+
+Entra no directório criado e inicia a aplicação:
 
 ```bash
 cd minha_app
-```
-
-### Executar a aplicação
-
-```bash
 cargo run
 ```
 
-Por padrão, o servidor é configurado para iniciar em:
+Por padrão, o servidor de demonstração é iniciado em:
 
 ```text
 http://127.0.0.1:3000
 ```
 
-### Consultar os comandos disponíveis
+### Comandos disponíveis
+
+Para consultar os comandos e opções do CLI:
 
 ```bash
 rustpress --help
 ```
 
-### Consultar a versão
+Para consultar a versão instalada:
 
 ```bash
 rustpress --version
 ```
+
+O projecto gerado utiliza a dependência `rustpress-web = "0.2.0"` e o runtime Tokio.
+
+Código-fonte do RustPress CLI: https://github.com/fabriciomichael/rustpress-cli
 
 ## Estrutura do projecto
 
@@ -148,23 +155,17 @@ minha_app/
 └── tests/
 ```
 
-## Saiba mais em:
 
-```bash
-git clone https://github.com/fabriciomichael/rustpress-cli.git
-```
 
 
 O servidor de demonstração fica disponível em `http://127.0.0.1:3000`.
-
-> **Nota sobre a utilização como dependência:** o código do repositório tem o nome de pacote `rustpress`, mas os metadados de publicação e o URL de repositório ainda devem ser alinhados antes de apresentar `cargo add rustpress` como instrução de instalação de uma versão publicada. Para desenvolver com este repositório, use os comandos acima.
 
 ## Arranque rápido
 
 O exemplo seguinte regista rotas, lê um parâmetro dinâmico e responde a um pedido POST. Os handlers GET e POST actuais devolvem `Result<Response, HandlerError>`, por isso é possível propagar erros com `?`.
 
 ```rust
-use rustpress::{App, Request, Response};
+use rustpress_web::{App, Request, Response};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -233,50 +234,53 @@ app.get("/produtos", |req: Request, res: Response| {
 })?;
 ```
 
-### O que o Request disponibiliza
+### API do Request
 
-A API pública actual de `Request` inclui:
+O tipo `Request` disponibiliza métodos para consultar os dados da requisição HTTP:
 
-- `method()`: método HTTP;
-- `path()`: caminho sem a query string;
-- `header("Content-Type")`: acesso a um cabeçalho;
-- `param("id")`: parâmetro dinâmico da rota;
-- `query("pagina")`: parâmetro da query string;
-- `context()`: cópia dos metadados da requisição para o handler de erros.
+- `method()`: devolve o método HTTP utilizado.
+- `path()`: devolve o caminho da URL, sem a query string.
+- `header(name)`: consulta um cabeçalho HTTP.
+- `param(name)`: obtém o valor de um parâmetro dinâmico da rota.
+- `query(name)`: obtém o valor de um parâmetro da query string.
+- `cookies()`: devolve a lista de cookies recebidos.
+- `cookie(name)`: procura um cookie pelo nome.
+- `body()`: disponibiliza o corpo da requisição em bytes.
+- `text()`: interpreta o corpo como texto UTF-8.
+- `json<T>()`: converte o corpo JSON numa estrutura Rust que implemente `DeserializeOwned`.
+- `form()`: descodifica os campos de um formulário URL-encoded, preservando a ordem e os nomes repetidos.
+- `session()`: disponibiliza a sessão associada à requisição, quando activada.
+- `regenerate_session()`: regenera o identificador da sessão actual.
+- `context()`: cria uma cópia dos metadados da requisição para o tratamento de erros.
 
-**Limitação actual importante:** a API pública de `Request` ainda não expõe um método para ler o corpo bruto do pedido nem para descodificar automaticamente formulários `application/x-www-form-urlencoded` ou `multipart/form-data`. Por isso, embora seja possível registar uma rota POST, isso não significa que o RustPress já processe campos de formulários ou uploads de ficheiros. Não confunda o suporte ao método HTTP POST com suporte a FormData.
+**Limitação conhecida:** o processamento de `multipart/form-data` e o upload de ficheiros ainda não estão implementados. O método `form()` destina-se a formulários URL-encoded.
 
-## Respostas HTTP
+### API do Response
 
-O tipo `Response` permite construir respostas encadeando métodos:
+O tipo `Response` disponibiliza métodos para construir respostas HTTP:
 
-```rust
-app.get("/sobre", |_req: Request, res: Response| {
-    Ok(res
-        .status(200)
-        .header("X-App", "RustPress")
-        .html("<h1>Sobre o projecto</h1>"))
-})?;
-```
-
-Métodos disponíveis:
-
-- `Response::new()`: cria uma resposta com estado 200.
-- `.status(code)`: define o código HTTP.
-- `.send(text)`: envia texto simples.
-- `.html(html)`: envia HTML.
-- `.json(json_string)`: envia uma string JSON.
-- `.error(code, message)`: cria uma resposta de erro em texto.
-- `.json_error(code, message)`: cria uma resposta de erro JSON.
-- `.header(name, value)`: define um cabeçalho.
+- `Response::new()`: cria uma resposta com estado HTTP 200.
+- `.status(code)`: define o código de estado HTTP.
+- `.status_code()`: consulta o código de estado actual.
+- `.send(body)`: envia texto simples.
+- `.html(body)`: envia conteúdo HTML.
+- `.json(body)`: envia conteúdo JSON em formato textual.
+- `Response::error(code, message)`: cria uma resposta de erro em texto simples.
+- `Response::json_error(code, message)`: cria uma resposta de erro em JSON.
+- `.header(name, value)`: adiciona ou substitui um cabeçalho HTTP.
 - `.send_bytes(bytes)`: envia conteúdo binário.
 - `.render_file(path)`: carrega um ficheiro HTML sem processar variáveis.
 - `.render_template(path, context)`: carrega e processa um template com contexto.
-- `.render(page, layout, partials_dir, context)`: renderiza uma página com layout e partials, em modo estrito.
-- `Response::error_page(...)`: cria uma página de erro com layout e partials.
+- `.render(page, layout, partials_dir, context)`: renderiza uma página com layout e partials, usando validação rigorosa.
+- `Response::error_page(...)`: cria uma página de erro personalizada.
+- `.cookie(cookie, config)`: adiciona um cookie à resposta.
+- `.remove_cookie(name, config)`: envia um cabeçalho para remover um cookie.
+- `Response::redirect(path)`: cria um redireccionamento HTTP 302.
+- `Response::redirect_with_status(code, path)`: cria um redireccionamento com os estados 301, 302, 303, 307 ou 308.
 
-O método `.json(...)` recebe texto JSON; use `serde_json::json!(...).to_string()` para gerar JSON válido. O RustPress não converte automaticamente qualquer estrutura Rust em JSON através deste método.
+**Nota sobre JSON:** o método `.json(...)` recebe conteúdo em formato textual. Para converter estruturas Rust em JSON, pode utilizar `serde_json::json!(...).to_string()`.
 
+**Nota sobre cookies:** os métodos `cookie()` e `remove_cookie()` recebem uma configuração `SessionConfig` e devolvem um `Result`, permitindo detectar erros na criação dos cabeçalhos.
 ## Middleware
 
 ### Middleware simples
@@ -302,7 +306,7 @@ O middleware avançado devolve um dos valores de `MiddlewareResult`:
 - `MiddlewareResult::Error(error)`: encaminha o erro para o tratamento central.
 
 ```rust
-use rustpress::{App, MiddlewareResult, Request, Response};
+use rustpress_web::{App, MiddlewareResult, Request, Response};
 
 let mut app = App::new();
 
@@ -326,7 +330,7 @@ O RustPress disponibiliza `HandlerError` para que um handler possa devolver uma 
 ### Criar e devolver um erro
 
 ```rust
-use rustpress::{App, HandlerError, Request, Response};
+use rustpress_web::{App, HandlerError, Request, Response};
 
 let mut app = App::new();
 
@@ -386,7 +390,7 @@ Níveis disponíveis:
 O nível mínimo pode ser definido na aplicação com `app.set_log_level(...)` ou num logger independente com `logger.set_level(...)`.
 
 ```rust
-use rustpress::{App, Level, Logger};
+use rustpress_web::{App, Level, Logger};
 
 fn main() {
     let mut app = App::new();
@@ -509,7 +513,7 @@ Crie os ficheiros:
 Renderize a página indicando os três caminhos:
 
 ```rust
-use rustpress::{Request, Response, TemplateContext};
+use rustpress_web::{Request, Response, TemplateContext};
 use serde_json::json;
 
 let mut context = TemplateContext::new();
@@ -542,7 +546,7 @@ Dentro de um ciclo, as propriedades de cada objecto ficam disponíveis pelo seu 
 Exemplo de contexto:
 
 ```rust
-use rustpress::TemplateContext;
+use rustpress_web::TemplateContext;
 use serde_json::json;
 
 let mut context = TemplateContext::new();
@@ -630,19 +634,14 @@ cargo check --examples
 
 ## Limitações conhecidas e funcionalidades futuras
 
-As funcionalidades abaixo **não devem ser consideradas implementadas** só por existirem rotas HTTP ou middleware:
+Apesar das funcionalidades já implementadas, algumas áreas ainda podem ser desenvolvidas:
 
-- leitura e descodificação do corpo dos pedidos;
-- parsing de formulários HTML (`application/x-www-form-urlencoded`);
-- parsing de `multipart/form-data` e upload de ficheiros;
-- sessão, cookies e autenticação integrados;
-- acesso integrado a bases de dados;
-- rotas agrupadas e routers modulares;
-- API completa de respostas como redireccionamentos e envio de ficheiros para download;
-- suporte a WebSocket.
+- **Upload de ficheiros:** parsing de `multipart/form-data` e envio de ficheiros.
+- **Integração com bases de dados:** suporte integrado para acesso e gestão de bases de dados.
+- **Grupos de rotas:** agrupamento de rotas, prefixos e organização modular de routers.
+- **WebSocket:** suporte à comunicação bidireccional em tempo real.
 
-Estas áreas podem ser desenvolvidas futuramente, com APIs e testes próprios. O roadmap deve ser actualizado à medida que cada funcionalidade for efectivamente implementada.
-
+Estas funcionalidades fazem parte das possíveis evoluções do RustPress Web e deverão ser acompanhadas de APIs e testes próprios.
 ## Documentação adicional
 
 - [Arquitectura do RustPress](docs/ARCHITECTURE.md)

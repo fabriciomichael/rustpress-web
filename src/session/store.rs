@@ -359,10 +359,10 @@ impl SessionStore for MemoryStore {
                 revoked
                     .entry(session_id.to_string())
                     .and_modify(|existing_expiry| {
-                        if let Some(current_expiry) = existing_expiry {
-                            if *current_expiry < expiry {
-                                *existing_expiry = Some(expiry);
-                            }
+                        if let Some(current_expiry) = existing_expiry
+                            && *current_expiry < expiry
+                        {
+                            *existing_expiry = Some(expiry);
                         }
                     })
                     .or_insert(Some(expiry));
