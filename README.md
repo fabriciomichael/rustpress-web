@@ -22,10 +22,12 @@ O projecto procura combinar uma interface familiar para quem conhece o Express.j
 
 > O RustPress encontra-se em desenvolvimento. Consulte a API e os exemplos existentes neste repositório antes de assumir que uma funcionalidade de outros frameworks já está disponível.
 
+
 ## Funcionalidades actuais
 
 - **Servidor HTTP assíncrono:** Hyper 1 e Tokio.
 - **Rotas HTTP:** GET, POST, PUT, PATCH e DELETE.
+- **Grupos de rotas:** agrupamento de rotas com prefixos, suporte a grupos aninhados e middleware específico por grupo.
 - **Parâmetros dinâmicos:** padrões como `/utilizadores/:id`.
 - **Query strings:** consulta de parâmetros como `?pagina=2&limite=10`.
 - **Request:** leitura do corpo, texto, JSON, formulários URL-encoded, headers, cookies, parâmetros e sessões.
@@ -35,10 +37,12 @@ O projecto procura combinar uma interface familiar para quem conhece o Express.j
 - **Protecção CSRF:** validação de tokens através de headers ou formulários.
 - **Sessões:** gestão de sessões, armazenamento em memória, regeneração e destruição de sessões.
 - **Tratamento global de erros:** handler global e páginas de erro 404, 405 e 500.
+- **Segurança de palavras-passe:** geração e verificação de hashes com Argon2id.
 - **Ficheiros estáticos:** publicação de CSS, JavaScript, imagens e outros ficheiros a partir de uma pasta configurada.
-- **Templates HTML:** variáveis, condições, ciclos, layouts e partials.
+- **Templates HTML:** variáveis, condições, ciclos, layouts e partials, com validação rigorosa e escape de valores.
 - **Logger:** níveis DEBUG, INFO, WARN e ERROR, com saída colorida e registo de pedidos do servidor.
 - **Testes:** testes unitários e testes de integração para funcionalidades existentes.
+
 ## Requisitos
 
 - Rust estável com suporte à edição **2024**.
@@ -281,6 +285,78 @@ O tipo `Response` disponibiliza métodos para construir respostas HTTP:
 **Nota sobre JSON:** o método `.json(...)` recebe conteúdo em formato textual. Para converter estruturas Rust em JSON, pode utilizar `serde_json::json!(...).to_string()`.
 
 **Nota sobre cookies:** os métodos `cookie()` e `remove_cookie()` recebem uma configuração `SessionConfig` e devolvem um `Result`, permitindo detectar erros na criação dos cabeçalhos.
+
+## Segurança de palavras-passe
+
+O RustPress disponibiliza o módulo `security` para proteger palavras-passe através do algoritmo **Argon2id**.
+
+A API permite gerar hashes seguros e verificar palavras-passe sem armazenar os valores originais.
+
+### Gerar um hash
+
+```rust
+use rustpress_web::security::Password;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let password = "MinhaSenhaSegura123";
+
+    let hash = Password::hash(password)?;
+
+    println!("Hash: {hash}");
+
+    Ok(())
+}
+```
+
+### Verificar uma palavra-passe
+
+```rust
+use rustpress_web::security::Password;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let password = "MinhaSenhaSegura123";
+
+    let hash = Password::hash(password)?;
+
+    if Password::verify(password, &hash)? {
+        println!("Palavra-passe correcta!");
+    } else {
+        println!("Palavra-passe incorrecta!");
+    }
+
+    Ok(())
+}
+```
+
+### Configuração personalizada
+
+A configuração padrão utiliza Argon2id com os seguintes parâmetros:
+
+- Memória: 19 456 KiB (aproximadamente 19 MiB);
+- Iterações: 2;
+- Paralelismo: 1;
+- Tamanho do hash: 32 bytes.
+
+É possível fornecer uma configuração personalizada através de `PasswordConfig` e do método `Password::hash_with_config()`. Valores inferiores aos padrões podem reduzir a resistência do hash a ataques de força bruta. Ajuste estes parâmetros tendo em conta a segurança e os recursos disponíveis no servidor.
+
+```rust
+use rustpress_web::security::{Password, PasswordConfig};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = PasswordConfig {
+        memory_cost: 19_456,
+        time_cost: 2,
+        parallelism: 1,
+        output_length: 32,
+    };
+
+    let hash = Password::hash_with_config("MinhaSenhaSegura123", config)?;
+
+    println!("Hash: {hash}");
+
+    Ok(())
+}
+```
 ## Middleware
 
 ### Middleware simples
@@ -453,7 +529,7 @@ rustpress-web/
     │   └── main.html
     ├── partials/
     │   ├── header.html
-    │   └── footer.htm
+    │   └── footer.html
     └── index.html
 ```
 
@@ -636,12 +712,12 @@ cargo check --examples
 
 Apesar das funcionalidades já implementadas, algumas áreas ainda podem ser desenvolvidas:
 
-- **Upload de ficheiros:** parsing de `multipart/form-data` e envio de ficheiros.
+- **Upload de ficheiros:** parsing de `multipart/form-data`, validação e armazenamento seguro de ficheiros.
 - **Integração com bases de dados:** suporte integrado para acesso e gestão de bases de dados.
-- **Grupos de rotas:** agrupamento de rotas, prefixos e organização modular de routers.
 - **WebSocket:** suporte à comunicação bidireccional em tempo real.
 
 Estas funcionalidades fazem parte das possíveis evoluções do RustPress Web e deverão ser acompanhadas de APIs e testes próprios.
+
 ## Documentação adicional
 
 - [Arquitectura do RustPress](docs/ARCHITECTURE.md)
