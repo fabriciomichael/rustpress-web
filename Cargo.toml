@@ -25,3 +25,4 @@ argon2 = { version = "0.5", features = ["std"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 multer = "3"
 futures-util = "0.3.34"
+hyper-tungstenite = "0.30.0"
