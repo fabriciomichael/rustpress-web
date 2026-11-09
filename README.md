@@ -38,6 +38,7 @@ O projecto procura combinar uma interface familiar para quem conhece o Express.j
 - **Sessões:** gestão de sessões, armazenamento em memória, regeneração e destruição de sessões.
 - **Tratamento global de erros:** handler global e páginas de erro 404, 405 e 500.
 - **Segurança de palavras-passe:** geração e verificação de hashes com Argon2id.
+- **Upload de ficheiros:** recepção de multipart/form-data, validação de limites e armazenamento com nomes gerados pelo framework.
 - **Ficheiros estáticos:** publicação de CSS, JavaScript, imagens e outros ficheiros a partir de uma pasta configurada.
 - **Templates HTML:** variáveis, condições, ciclos, layouts e partials, com validação rigorosa e escape de valores.
 - **Logger:** níveis DEBUG, INFO, WARN e ERROR, com saída colorida e registo de pedidos do servidor.
@@ -252,12 +253,14 @@ O tipo `Request` disponibiliza métodos para consultar os dados da requisição 
 - `body()`: disponibiliza o corpo da requisição em bytes.
 - `text()`: interpreta o corpo como texto UTF-8.
 - `json<T>()`: converte o corpo JSON numa estrutura Rust que implemente `DeserializeOwned`.
-- `form()`: descodifica os campos de um formulário URL-encoded, preservando a ordem e os nomes repetidos.
+- `form()`: descodifica campos de formulários URL-encoded ou multipart/form-data, preservando a ordem e os nomes repetidos.
+- `files()`: devolve os ficheiros recebidos através de multipart/form-data.
+- `file(field_name)`: procura o primeiro ficheiro associado ao nome do campo.
 - `session()`: disponibiliza a sessão associada à requisição, quando activada.
 - `regenerate_session()`: regenera o identificador da sessão actual.
 - `context()`: cria uma cópia dos metadados da requisição para o tratamento de erros.
 
-**Limitação conhecida:** o processamento de `multipart/form-data` e o upload de ficheiros ainda não estão implementados. O método `form()` destina-se a formulários URL-encoded.
+
 
 ### API do Response
 
@@ -357,6 +360,85 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+## Upload de ficheiros
+
+O RustPress permite receber ficheiros através de pedidos HTTP com conteúdo `multipart/form-data`. A funcionalidade tem de ser activada explicitamente através de `App::use_uploads()`.
+
+### Configurar o armazenamento
+
+```rust
+use rustpress_web::{App, upload::UploadConfig};
+
+let mut app = App::new();
+
+app.use_uploads(
+    UploadConfig::new("storage/uploads")
+)?;
+```
+
+A configuração permite definir limites para proteger a aplicação:
+
+| Método | Descrição | Padrão |
+|---|---|---:|
+| `with_max_total_size(size)` | Tamanho máximo total do pedido | 25 MiB |
+| `with_max_file_size(size)` | Tamanho máximo de cada ficheiro | 10 MiB |
+| `with_max_files(count)` | Número máximo de ficheiros | 5 |
+| `with_max_fields(count)` | Número máximo de campos de texto | 32 |
+| `with_max_field_size(size)` | Tamanho máximo de cada campo de texto | 64 KiB |
+
+Os tamanhos são definidos em bytes. Os limites personalizados são validados antes de serem aceites.
+
+### Receber um ficheiro
+
+```rust
+use rustpress_web::{App, Request, Response};
+use rustpress_web::upload::UploadConfig;
+
+let mut app = App::new();
+
+app.use_uploads(
+    UploadConfig::new("storage/uploads")
+)?;
+
+app.post("/upload", |req: Request, res: Response| {
+    if let Some(file) = req.file("avatar") {
+        println!("Nome original: {:?}", file.original_name());
+        println!("Nome armazenado: {}", file.stored_name());
+        println!("Caminho: {:?}", file.path());
+        println!("Tamanho: {} bytes", file.size());
+        println!("Tipo de conteúdo: {:?}", file.content_type());
+    }
+
+    Ok(res.send("Pedido recebido"))
+})?;
+```
+
+O formulário HTML correspondente pode ser:
+
+```html
+<form action="/upload" method="POST" enctype="multipart/form-data">
+    <input type="file" name="avatar">
+    <button type="submit">Enviar ficheiro</button>
+</form>
+```
+
+### Consultar ficheiros e campos
+
+O `Request` disponibiliza:
+
+- `file("avatar")`: procura um ficheiro pelo nome do campo.
+- `files()`: devolve a lista de ficheiros recebidos.
+- `form()`: devolve os campos de texto do formulário.
+
+Cada `UploadedFile` disponibiliza o nome do campo, o nome original, o nome armazenado, o caminho, o tipo de conteúdo e o tamanho.
+
+### Segurança e limitações
+
+- Os ficheiros são armazenados com nomes únicos gerados pelo framework; o nome fornecido pelo cliente não é utilizado como caminho de armazenamento.
+- O nome original é disponibilizado apenas como metadado e não deve ser considerado confiável.
+- Os limites de tamanho e quantidade são aplicados durante o processamento.
+- Se o processamento falhar ou um middleware rejeitar o pedido, os ficheiros temporários ou já guardados durante esse processamento são removidos.
+- O processamento actual recebe o corpo multipart em memória antes de analisar os campos e guardar os ficheiros. Portanto, ainda não é uma implementação de upload em streaming.
 ## Middleware
 
 ### Middleware simples
@@ -712,7 +794,6 @@ cargo check --examples
 
 Apesar das funcionalidades já implementadas, algumas áreas ainda podem ser desenvolvidas:
 
-- **Upload de ficheiros:** parsing de `multipart/form-data`, validação e armazenamento seguro de ficheiros.
 - **Integração com bases de dados:** suporte integrado para acesso e gestão de bases de dados.
 - **WebSocket:** suporte à comunicação bidireccional em tempo real.
 

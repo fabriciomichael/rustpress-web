@@ -16,6 +16,7 @@ use crate::{
     router::{Handler, Middleware, Router},
     server,
     session::{CookieError, SessionConfig},
+    upload::{UploadConfig, UploadError},
 };
 
 use std::{
@@ -273,6 +274,14 @@ impl App {
     pub fn use_sessions(&mut self, config: SessionConfig) -> Result<(), CookieError> {
         config.validate()?;
         self.router.enable_sessions(config);
+        Ok(())
+    }
+    /// Activa o recebimento de ficheiros através de `multipart/form-data`.
+    ///
+    /// A configuração é validada antes de ser aplicada à aplicação.
+    pub fn use_uploads(&mut self, config: UploadConfig) -> Result<(), UploadError> {
+        config.validate()?;
+        self.router.enable_uploads(config);
         Ok(())
     }
     /// Define o nível mínimo de registo da aplicação.

@@ -12,7 +12,10 @@ use std::{
 use bytes::{Bytes, BytesMut};
 use http_body_util::BodyExt;
 use http_body_util::Full;
-use hyper::{Request as HyperRequest, Response as HyperResponse, body::Incoming, http::Method};
+use hyper::{
+    Request as HyperRequest, Response as HyperResponse, body::Incoming, header::CONTENT_TYPE,
+    http::Method,
+};
 
 use crate::{
     HandlerError, MiddlewareResult, TemplateContext,
@@ -20,6 +23,7 @@ use crate::{
     request::Request,
     response::Response,
     session::{Cookie, MemoryStore, SessionConfig, SessionManager},
+    upload::{UploadConfig, UploadError, process},
 };
 
 const MAX_BODY_SIZE: usize = 1024 * 1024;
@@ -70,6 +74,7 @@ pub(crate) struct Router {
     error_handler: Option<ErrorHandler>,
 
     session: Option<SessionState>,
+    uploads: Option<crate::upload::UploadConfig>,
 
     logger: Logger,
 }
@@ -89,6 +94,10 @@ impl Router {
             manager: Arc::new(manager),
             config,
         });
+    }
+    /// Activa o processamento de uploads no router.
+    pub(crate) fn enable_uploads(&mut self, config: UploadConfig) {
+        self.uploads = Some(config);
     }
 
     /// Regista uma nova rota no router.
@@ -400,6 +409,13 @@ impl Router {
         // Extrai o identificador antes de transferir a requisição HTTP.
         let session_id = self.extract_session_id(&parts.headers);
 
+        // Guarda o Content-Type antes de transferir os metadados HTTP.
+        let content_type = parts
+            .headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+
         // Cria o Request com os metadados e um corpo inicialmente vazio.
         let inner = HyperRequest::from_parts(parts, Bytes::new());
         let mut request = Request::new(inner, params);
@@ -429,12 +445,148 @@ impl Router {
             request.set_session_manager(Arc::clone(&session.manager));
         }
 
+        // Identifica pedidos multipart/form-data.
+
+        let is_multipart = content_type.as_deref().is_some_and(|value| {
+            value.split(';').next().is_some_and(|media_type| {
+                media_type
+                    .trim()
+                    .eq_ignore_ascii_case("multipart/form-data")
+            })
+        });
+
+        // Pedidos normais mantêm o limite de 1 MiB.
+        // Uploads respeitam o limite definido em UploadConfig.
+        let max_body_size = if is_multipart {
+            self.uploads
+                .as_ref()
+                .map(|config| usize::try_from(config.max_total_size()).unwrap_or(usize::MAX))
+                .unwrap_or(MAX_BODY_SIZE)
+        } else {
+            MAX_BODY_SIZE
+        };
+
         // Lemos o corpo antes dos middlewares para permitir que eles
         // analisem dados da requisição, como tokens CSRF enviados por formulário.
         if matched.is_some() {
-            match Self::read_body(incoming_body).await {
+            if is_multipart && self.uploads.is_none() {
+                let error = HandlerError::with_status(
+                    400,
+                    "O recebimento de ficheiros não está activado nesta aplicação.",
+                );
+
+                let response = self.handle_error(&error, &context);
+                let mut response =
+                    self.finalize_or_error_response(response, request.session(), &context);
+
+                if method == Method::HEAD {
+                    *response.body_mut() = Full::new(Bytes::new());
+                }
+
+                return response;
+            }
+
+            match Self::read_body(incoming_body, max_body_size).await {
                 Ok(body) => {
-                    request.set_body(body);
+                    request.set_body(body.clone());
+
+                    if is_multipart {
+                        let Some(config) = self.uploads.as_ref() else {
+                            let error = HandlerError::with_status(
+                                400,
+                                "O recebimento de ficheiros não está activado nesta aplicação.",
+                            );
+
+                            let response = self.handle_error(&error, &context);
+                            let mut response = self.finalize_or_error_response(
+                                response,
+                                request.session(),
+                                &context,
+                            );
+
+                            if method == Method::HEAD {
+                                *response.body_mut() = Full::new(Bytes::new());
+                            }
+
+                            return response;
+                        };
+
+                        let boundary = match content_type
+                            .as_deref()
+                            .and_then(|value| multer::parse_boundary(value).ok())
+                        {
+                            Some(boundary) => boundary,
+
+                            None => {
+                                let error = HandlerError::with_status(
+                                    400,
+                                    "O cabeçalho multipart/form-data contém um boundary inválido.",
+                                );
+
+                                let response = self.handle_error(&error, &context);
+                                let mut response = self.finalize_or_error_response(
+                                    response,
+                                    request.session(),
+                                    &context,
+                                );
+
+                                if method == Method::HEAD {
+                                    *response.body_mut() = Full::new(Bytes::new());
+                                }
+
+                                return response;
+                            }
+                        };
+
+                        match process(body, &boundary, config).await {
+                            Ok(data) => {
+                                request.set_multipart_data(data.fields, data.files);
+                            }
+
+                            Err(upload_error) => {
+                                let (status, message) = match &upload_error {
+                                    UploadError::FileSizeExceeded { .. }
+                                    | UploadError::FieldSizeExceeded { .. } => (
+                                        413,
+                                        "O tamanho dos dados enviados excede o limite permitido.",
+                                    ),
+
+                                    UploadError::TooManyFiles { .. }
+                                    | UploadError::TooManyFields { .. } => (
+                                        400,
+                                        "O pedido excede o número permitido de ficheiros ou campos.",
+                                    ),
+
+                                    UploadError::Multipart(_) => {
+                                        (400, "Não foi possível processar os dados multipart.")
+                                    }
+
+                                    UploadError::Storage(_) => {
+                                        (500, "Não foi possível guardar o ficheiro enviado.")
+                                    }
+
+                                    _ => (
+                                        500,
+                                        "A configuração ou o processamento do upload é inválido.",
+                                    ),
+                                };
+
+                                let error = HandlerError::with_status(status, message);
+                                let response = self.handle_error(&error, &context);
+                                let mut response = self.finalize_or_error_response(
+                                    response,
+                                    request.session(),
+                                    &context,
+                                );
+
+                                if method == Method::HEAD {
+                                    *response.body_mut() = Full::new(Bytes::new());
+                                }
+
+                                return response;
+                            }
+                        }
+                    }
                 }
 
                 Err(body_error) => {
@@ -459,7 +611,6 @@ impl Router {
                 }
             }
         }
-
         let route_middlewares = matched
             .as_ref()
             .map(|(entry, _)| entry.middlewares.as_slice())
@@ -486,6 +637,8 @@ impl Router {
                 MiddlewareResult::Next => {}
 
                 MiddlewareResult::Respond(response) => {
+                    request.cleanup_uploaded_files().await;
+
                     let mut response =
                         self.finalize_or_error_response(response, request.session(), &context);
 
@@ -497,6 +650,8 @@ impl Router {
                 }
 
                 MiddlewareResult::Error(error) => {
+                    request.cleanup_uploaded_files().await;
+
                     let response = self.handle_error(&error, &context);
 
                     let mut response =
@@ -754,14 +909,14 @@ impl Router {
         self.logger = logger;
     }
 
-    async fn read_body(mut body: Incoming) -> Result<Bytes, BodyReadError> {
+    async fn read_body(mut body: Incoming, max_size: usize) -> Result<Bytes, BodyReadError> {
         let mut buffer = BytesMut::new();
 
         while let Some(frame) = body.frame().await {
             let frame = frame.map_err(|_| BodyReadError::Read)?;
 
             if let Some(data) = frame.data_ref() {
-                if data.len() > MAX_BODY_SIZE.saturating_sub(buffer.len()) {
+                if data.len() > max_size.saturating_sub(buffer.len()) {
                     return Err(BodyReadError::TooLarge);
                 }
 

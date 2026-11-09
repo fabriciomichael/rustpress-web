@@ -4,6 +4,7 @@
 //! rota, query string e corpo HTTP.
 
 use crate::session::{Cookie, CookieError, Session, SessionManager};
+use crate::upload::UploadedFile;
 use bytes::Bytes;
 use hyper::{
     header::{COOKIE, HeaderValue},
@@ -22,6 +23,9 @@ pub struct Request {
     params: Vec<(String, String)>,
     session: Option<Arc<Mutex<Session>>>,
     session_manager: Option<Arc<SessionManager>>,
+    multipart_fields: Vec<(String, String)>,
+    is_multipart: bool,
+    uploaded_files: Vec<UploadedFile>,
 }
 
 impl Request {
@@ -33,6 +37,9 @@ impl Request {
             params,
             session: None,
             session_manager: None,
+            multipart_fields: Vec::new(),
+            is_multipart: false,
+            uploaded_files: Vec::new(),
         }
     }
 
@@ -207,11 +214,45 @@ impl Request {
     ///
     /// Exemplo: `nome=Fabricio&interesses=Rust&interesses=PHP`.
     pub fn form(&self) -> Vec<(String, String)> {
+        if self.is_multipart {
+            return self.multipart_fields.clone();
+        }
+
         form_urlencoded::parse(self.body()).into_owned().collect()
+    }
+
+    /// Devolve todos os ficheiros recebidos na requisição.
+    pub fn files(&self) -> &[UploadedFile] {
+        &self.uploaded_files
+    }
+
+    /// Procura o primeiro ficheiro associado ao nome de um campo do formulário.
+    pub fn file(&self, field_name: &str) -> Option<&UploadedFile> {
+        self.uploaded_files
+            .iter()
+            .find(|file| file.field_name() == field_name)
+    }
+
+    /// Associa os dados multipart processados à requisição.
+    pub(crate) fn set_multipart_data(
+        &mut self,
+        fields: Vec<(String, String)>,
+        files: Vec<UploadedFile>,
+    ) {
+        self.multipart_fields = fields;
+        self.uploaded_files = files;
+        self.is_multipart = true;
     }
 
     pub(crate) fn set_body(&mut self, body: Bytes) {
         *self.inner.body_mut() = body;
+    }
+
+    /// Remove os ficheiros armazenados quando a requisição é rejeitada.
+    pub(crate) async fn cleanup_uploaded_files(&mut self) {
+        for file in self.uploaded_files.drain(..) {
+            let _ = tokio::fs::remove_file(file.path()).await;
+        }
     }
 }
 
