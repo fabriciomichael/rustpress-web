@@ -713,6 +713,238 @@ Códigos aceites:
 
 O destino pode ser um caminho local, como `/login`, ou uma URI absoluta válida. Não construa destinos a partir de dados não confiáveis do utilizador: valide-os e prefira caminhos locais conhecidos para evitar redireccionamentos abertos (*open redirects*).
 
+## Rotas em grupo
+
+O RustPress permite organizar rotas relacionadas em grupos através de `App::group()`. Um grupo aplica um prefixo comum aos caminhos das rotas e permite associar middlewares a todas as rotas desse grupo.
+
+Esta funcionalidade é útil para estruturar APIs, separar áreas públicas e privadas e organizar módulos como administração, utilizadores e produtos.
+
+### Criar um grupo de rotas
+
+O método `group()` recebe dois argumentos:
+
+- `prefix`: prefixo comum das rotas do grupo.
+- `configure`: closure que recebe um `RouteGroup` e regista as rotas.
+
+Exemplo:
+
+```rust
+use rustpress_web::{App, Request, Response};
+
+let mut app = App::new();
+
+app.group("/utilizadores", |users| {
+    users.get("/", |_req: Request, _res: Response| {
+        Ok(Response::json(r#"{"mensagem":"Lista de utilizadores"}"#))
+    })?;
+
+    users.get("/:id", |req: Request, _res: Response| {
+        let id = req.param("id").unwrap_or("desconhecido");
+
+        Ok(Response::json(
+            format!(r#"{{"utilizador":"{}"}}"#, id)
+        ))
+    })?;
+
+    users.post("/", |_req: Request, _res: Response| {
+        Ok(Response::json(r#"{"mensagem":"Utilizador criado"}"#))
+    })?;
+
+    Ok(())
+})?;
+```
+
+As rotas registadas ficam disponíveis nos seguintes caminhos:
+
+| Método | Caminho final |
+|---|---|
+| GET | `/utilizadores/` |
+| GET | `/utilizadores/:id` |
+| POST | `/utilizadores/` |
+
+O prefixo é combinado automaticamente com o caminho de cada rota. Pode escrever os caminhos das rotas com ou sem a barra inicial; o RustPress normaliza a junção.
+
+### Métodos HTTP disponíveis
+
+Um `RouteGroup` suporta os métodos GET, POST, PUT, PATCH e DELETE:
+
+```rust
+app.group("/api/produtos", |products| {
+    products.get("/", |_req, _res| {
+        Ok(Response::json(r#"{"metodo":"GET"}"#))
+    })?;
+
+    products.post("/", |_req, _res| {
+        Ok(Response::json(r#"{"metodo":"POST"}"#))
+    })?;
+
+    products.put("/:id", |_req, _res| {
+        Response::json(r#"{"metodo":"PUT"}"#)
+    })?;
+
+    products.patch("/:id", |_req, _res| {
+        Response::json(r#"{"metodo":"PATCH"}"#)
+    })?;
+
+    products.delete("/:id", |_req, _res| {
+        Response::json(r#"{"metodo":"DELETE"}"#)
+    })?;
+
+    Ok(())
+})?;
+```
+
+Os handlers GET e POST recebem uma closure que devolve `Result<Response, HandlerError>`. Os métodos PUT, PATCH e DELETE também disponibilizam variantes `put_fallible()`, `patch_fallible()` e `delete_fallible()` para handlers que precisam de devolver erros:
+
+```rust
+use rustpress_web::HandlerError;
+
+app.group("/api", |api| {
+    api.put_fallible("/recurso/:id", |_req, _res| {
+        Err(HandlerError::with_status(422, "Dados inválidos"))
+    })?;
+
+    api.patch_fallible("/recurso/:id", |_req, _res| {
+        Err(HandlerError::with_status(422, "Não foi possível actualizar"))
+    })?;
+
+    api.delete_fallible("/recurso/:id", |_req, _res| {
+        Err(HandlerError::with_status(404, "Recurso não encontrado"))
+    })?;
+
+    Ok(())
+})?;
+```
+
+### Aplicar middleware a um grupo
+
+Use `use_middleware()` para associar um middleware simples a todas as rotas do grupo. Se devolver `Some(Response)`, a execução da rota é interrompida; se devolver `None`, o pedido continua:
+
+```rust
+app.group("/admin", |admin| {
+    admin.use_middleware(|req| {
+        if req.header("x-admin-token")
+            .and_then(|value| value.to_str().ok())
+            == Some("token-de-exemplo")
+        {
+            None
+        } else {
+            Some(Response::new()
+                .status(401)
+                .send("Acesso não autorizado"))
+        }
+    });
+
+    admin.get("/painel", |_req, _res| {
+        Ok(Response::html("<h1>Painel administrativo</h1>"))
+    })?;
+
+    admin.get("/relatorios", |_req, _res| {
+        Ok(Response::html("<h1>Relatórios</h1>"))
+    })?;
+
+    Ok(())
+})?;
+```
+
+O exemplo utiliza um token fixo apenas para demonstrar o funcionamento do middleware. Numa aplicação real, utilize autenticação segura, sessões ou os middlewares de autenticação disponibilizados pelo RustPress.
+
+Para controlo mais avançado, use `use_middleware_advanced()`. Este método permite continuar a cadeia, responder directamente ou devolver um erro através de `MiddlewareResult`:
+
+```rust
+use rustpress_web::{MiddlewareResult, Response};
+
+app.group("/api", |api| {
+    api.use_middleware_advanced(|req| {
+        if req.header("x-api-key").is_some() {
+            MiddlewareResult::Next
+        } else {
+            MiddlewareResult::Respond(
+                Response::new()
+                    .status(401)
+                    .send("Chave da API em falta")
+            )
+        }
+    });
+
+    api.get("/dados", |_req, _res| {
+        Ok(Response::json(r#"{"estado":"autorizado"}"#))
+    })?;
+
+    Ok(())
+})?;
+```
+
+### Grupos aninhados
+
+Pode criar grupos dentro de outros grupos. Os prefixos são combinados e os middlewares são herdados na ordem de hierarquia:
+
+```rust
+app.group("/admin", |admin| {
+    admin.use_middleware_advanced(|_req| {
+        println!("Middleware do grupo admin");
+        MiddlewareResult::Next
+    });
+
+    admin.group("/utilizadores", |users| {
+        users.use_middleware_advanced(|_req| {
+            println!("Middleware do grupo utilizadores");
+            MiddlewareResult::Next
+        });
+
+        users.get("/", |_req, _res| {
+            Ok(Response::json(r#"{"area":"admin/utilizadores"}"#))
+        })?;
+
+        users.get("/:id", |req, _res| {
+            let id = req.param("id").unwrap_or("desconhecido");
+
+            Ok(Response::json(
+                format!(r#"{{"id":"{}"}}"#, id)
+            ))
+        })?;
+
+        Ok(())
+    })?;
+
+    Ok(())
+})?;
+```
+
+A rota de listagem do exemplo fica disponível em `GET /admin/utilizadores/`, e a rota individual em `GET /admin/utilizadores/:id`.
+
+A ordem de execução dos middlewares é:
+
+1. Middlewares globais registados na aplicação.
+2. Middlewares do grupo exterior (`/admin`).
+3. Middlewares do grupo interior (`/admin/utilizadores`).
+4. Handler da rota.
+
+Os middlewares de um grupo são aplicados a todas as rotas desse grupo, mesmo que sejam declarados depois de algumas rotas dentro da closure.
+
+### Tratamento de erros e validação dos grupos
+
+O método `group()` devolve `Result<(), String>`; por isso, use `?` ou trate explicitamente o erro. O RustPress valida os caminhos e rejeita conflitos ou rotas duplicadas.
+
+A configuração do grupo é atómica: se a closure devolver um erro, ou se houver conflito ao registar as rotas, nenhuma das rotas desse grupo é adicionada à aplicação. Isto evita deixar a aplicação parcialmente configurada.
+
+```rust
+let result = app.group("/admin", |admin| {
+    admin.get("/painel", |_req, _res| {
+        Ok(Response::html("<h1>Painel</h1>"))
+    })?;
+
+    // Simula uma falha durante a configuração.
+    Err("Falha ao configurar o grupo".to_string())
+});
+
+if let Err(error) = result {
+    eprintln!("Não foi possível registar o grupo: {error}");
+}
+```
+
+**Nota:** os grupos organizam rotas e middlewares durante a configuração da aplicação. Não criam servidores separados nem alteram, por si só, as permissões de acesso. Para proteger rotas, associe middlewares de autenticação/autorização adequados.
+
 ## Middleware
 
 ### Middleware simples
