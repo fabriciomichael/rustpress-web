@@ -439,6 +439,280 @@ Cada `UploadedFile` disponibiliza o nome do campo, o nome original, o nome armaz
 - Os limites de tamanho e quantidade são aplicados durante o processamento.
 - Se o processamento falhar ou um middleware rejeitar o pedido, os ficheiros temporários ou já guardados durante esse processamento são removidos.
 - O processamento actual recebe o corpo multipart em memória antes de analisar os campos e guardar os ficheiros. Portanto, ainda não é uma implementação de upload em streaming.
+## Sessões e autenticação
+
+O RustPress disponibiliza sessões HTTP através de `App::use_sessions()`. Por padrão, os dados são guardados em memória (`MemoryStore`) e identificados por um cookie chamado `rustpress_session`.
+
+### Activar sessões
+
+Active a gestão de sessões antes de iniciar o servidor:
+
+```rust
+use rustpress_web::{App, session::SessionConfig};
+
+let mut app = App::new();
+app.use_sessions(SessionConfig::default())?;
+```
+
+Pode personalizar o cookie e o tempo de vida da sessão:
+
+```rust
+use rustpress_web::session::{SameSite, SessionConfig};
+
+let config = SessionConfig {
+    cookie_name: "minha_app_session".to_string(),
+    max_age: 60 * 60, // uma hora, em segundos
+    http_only: true,
+    secure: true, // produção com HTTPS
+    same_site: SameSite::Lax,
+    ..SessionConfig::default()
+};
+
+app.use_sessions(config)?;
+```
+
+Em desenvolvimento local com HTTP, mantenha `secure: false`. Em produção, use HTTPS e active `secure: true`. O armazenamento padrão é em memória: as sessões não sobrevivem ao reinício do processo nem são partilhadas entre várias instâncias da aplicação.
+
+### Criar e guardar dados na sessão
+
+Quando as sessões estão activadas, cada pedido recebe uma sessão. Insira ou actualize os dados através de `Session::insert()`:
+
+```rust
+use rustpress_web::{HandlerError, Request, Response};
+
+app.post("/preferencias", |req: Request, _res: Response| {
+    let session = req.session()
+        .ok_or_else(|| HandlerError::new("Sessões não estão activadas."))?;
+
+    let mut session = session.lock()
+        .map_err(|_| HandlerError::new("Não foi possível aceder à sessão."))?;
+
+    session.insert("tema", "escuro")
+        .map_err(HandlerError::from_error)?;
+
+    session.insert("notificacoes", true)
+        .map_err(HandlerError::from_error)?;
+
+    Ok(Response::redirect_with_status(303, "/preferencias"))
+})?;
+```
+
+O RustPress guarda automaticamente a sessão modificada no final do pedido e envia o cookie correspondente na resposta. Não é necessário chamar um método `save()` no handler.
+
+### Recuperar dados e o ID do utilizador
+
+Os dados são recuperados com `Session::get::<T>()`. A aplicação deve guardar explicitamente o identificador do utilizador autenticado, por exemplo na chave `user_id`:
+
+```rust
+use rustpress_web::{HandlerError, Request, Response};
+
+app.get("/minha-conta", |req: Request, _res: Response| {
+    let session = req.session()
+        .ok_or_else(|| HandlerError::new("Sessões não estão activadas."))?;
+
+    let session = session.lock()
+        .map_err(|_| HandlerError::new("Não foi possível aceder à sessão."))?;
+
+    let Some(user_id) = session.get::<u64>("user_id") else {
+        return Ok(Response::redirect("/login"));
+    };
+
+    Ok(Response::json(
+        serde_json::json!({ "user_id": user_id }).to_string()
+    ))
+})?;
+```
+
+**Importante:** `user_id` é um dado da aplicação guardado durante o login. Não é o mesmo que o identificador técnico da sessão. Este último pode ser consultado com `session.id()`, mas deve ser tratado como um segredo: não o exponha em URLs, respostas, logs públicos ou código do lado do cliente.
+
+### Exemplo de login com sessão
+
+O exemplo seguinte demonstra o fluxo completo. As credenciais fixas servem apenas para ilustrar a integração; numa aplicação real, consulte o utilizador na base de dados e verifique a palavra-passe com `security::Password::verify()`.
+
+```rust
+use rustpress_web::{
+    App, HandlerError, Request, Response,
+    session::SessionConfig,
+};
+
+let mut app = App::new();
+app.use_sessions(SessionConfig::default())?;
+
+app.post("/login", |req: Request, _res: Response| {
+    let form = req.form();
+
+    let username = form.iter()
+        .find(|(key, _)| key == "username")
+        .map(|(_, value)| value.clone())
+        .unwrap_or_default();
+
+    let password = form.iter()
+        .find(|(key, _)| key == "password")
+        .map(|(_, value)| value.clone())
+        .unwrap_or_default();
+
+    // Demonstração: substitua pela consulta à base de dados
+    // e por Password::verify(&password, &hash_guardado).
+    if username != "demo" || password != "demo123" {
+        return Ok(Response::redirect("/login?erro=credenciais"));
+    }
+
+    // Renova o ID depois de autenticar, reduzindo o risco de session fixation.
+    let regenerated = req.regenerate_session()
+        .map_err(HandlerError::from_error)?;
+
+    if !regenerated {
+        return Err(HandlerError::new("Não foi possível regenerar a sessão."));
+    }
+
+    let session = req.session()
+        .ok_or_else(|| HandlerError::new("Sessão não disponível."))?;
+
+    let mut session = session.lock()
+        .map_err(|_| HandlerError::new("Não foi possível aceder à sessão."))?;
+
+    session.insert("user_id", 42_u64)
+        .map_err(HandlerError::from_error)?;
+
+    session.insert("username", username)
+        .map_err(HandlerError::from_error)?;
+
+    Ok(Response::redirect_with_status(303, "/painel"))
+})?;
+```
+
+Formulário HTML correspondente:
+
+```html
+<form action="/login" method="POST">
+    <label>
+        Utilizador
+        <input type="text" name="username" required>
+    </label>
+
+    <label>
+        Palavra-passe
+        <input type="password" name="password" required>
+    </label>
+
+    <button type="submit">Entrar</button>
+</form>
+```
+
+### Proteger uma rota
+
+Verifique a presença de `user_id` antes de devolver conteúdo privado:
+
+```rust
+app.get("/painel", |req: Request, _res: Response| {
+    let session = req.session()
+        .ok_or_else(|| HandlerError::new("Sessões não estão activadas."))?;
+
+    let session = session.lock()
+        .map_err(|_| HandlerError::new("Não foi possível aceder à sessão."))?;
+
+    let Some(user_id) = session.get::<u64>("user_id") else {
+        return Ok(Response::redirect("/login"));
+    };
+
+    Ok(Response::html(format!(
+        "<h1>Painel do utilizador {user_id}</h1>"
+    )))
+})?;
+```
+
+Para aplicações maiores, também pode utilizar `AuthMiddleware` e `RoleMiddleware`. O middleware de autenticação verifica a chave `user_id`; o middleware de papéis consulta a chave `role`.
+
+### Terminar sessão (logout)
+
+Chame `Session::destroy()` para destruir a sessão actual:
+
+```rust
+app.post("/logout", |req: Request, _res: Response| {
+    let session = req.session()
+        .ok_or_else(|| HandlerError::new("Sessões não estão activadas."))?;
+
+    let mut session = session.lock()
+        .map_err(|_| HandlerError::new("Não foi possível aceder à sessão."))?;
+
+    session.destroy();
+
+    Ok(Response::redirect_with_status(303, "/login"))
+})?;
+```
+
+Ao detectar uma sessão destruída, o RustPress remove-a do armazenamento, revoga o identificador e envia um cookie de remoção ao navegador. Não é necessário chamar manualmente `Response::remove_cookie()` para terminar uma sessão gerida pelo framework.
+
+### Remover dados sem terminar a sessão
+
+Use `Session::remove()` para apagar apenas uma chave, ou `Session::clear()` para limpar todos os dados sem destruir o identificador:
+
+```rust
+// Remover apenas o ID do utilizador:
+session.remove("user_id");
+
+// Remover todos os dados, mantendo a sessão:
+session.clear();
+```
+
+Use `destroy()` para logout. Use `clear()` apenas quando pretende manter a sessão activa, mas sem os dados actuais.
+
+### Regenerar o identificador da sessão
+
+Depois de autenticar o utilizador, regenere o identificador para reduzir o risco de session fixation:
+
+```rust
+let regenerated = req.regenerate_session()
+    .map_err(HandlerError::from_error)?;
+
+if !regenerated {
+    return Err(HandlerError::new("Gestão de sessões não está activada."));
+}
+```
+
+A regeneração cria um novo UUID, preserva os dados existentes e revoga o identificador anterior. O novo cookie é enviado quando a sessão modificada é finalizada.
+
+## Redireccionamentos HTTP
+
+O RustPress disponibiliza métodos estáticos em `Response` para redireccionar o cliente para outro caminho ou URL.
+
+### Redireccionamento simples
+
+```rust
+app.get("/antiga-pagina", |_req: Request, _res: Response| {
+    Ok(Response::redirect("/nova-pagina"))
+})?;
+```
+
+`Response::redirect(path)` cria uma resposta HTTP **302 Found**, adequada para um redireccionamento temporário.
+
+### Escolher o código HTTP
+
+Use `Response::redirect_with_status(code, path)` quando precisar de definir explicitamente o estado:
+
+```rust
+// Após um POST, encaminha o navegador para uma página GET.
+Ok(Response::redirect_with_status(303, "/resultado"))
+
+// Temporário e preserva o método HTTP e o corpo.
+Ok(Response::redirect_with_status(307, "/novo-endpoint"))
+
+// Redireccionamento permanente.
+Ok(Response::redirect_with_status(301, "/novo-endereco"))
+```
+
+Códigos aceites:
+
+| Código | Significado | Comportamento |
+|---:|---|---|
+| 301 | Moved Permanently | Redireccionamento permanente. |
+| 302 | Found | Redireccionamento temporário; é o padrão de `Response::redirect()`. |
+| 303 | See Other | Indica ao cliente que deve consultar o destino com GET; útil após POST/PUT/DELETE (Post/Redirect/Get). |
+| 307 | Temporary Redirect | Temporário e preserva o método HTTP e o corpo do pedido. |
+| 308 | Permanent Redirect | Permanente e preserva o método HTTP e o corpo do pedido. |
+
+O destino pode ser um caminho local, como `/login`, ou uma URI absoluta válida. Não construa destinos a partir de dados não confiáveis do utilizador: valide-os e prefira caminhos locais conhecidos para evitar redireccionamentos abertos (*open redirects*).
+
 ## Middleware
 
 ### Middleware simples
