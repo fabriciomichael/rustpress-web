@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="assets/rustpress-logo.svg" alt="RustPress — HTTP framework for Rust" width="520">
 </p>
 
@@ -27,6 +27,7 @@ O projecto procura combinar uma interface familiar para quem conhece o Express.j
 
 - **Servidor HTTP assíncrono:** Hyper 1 e Tokio.
 - **Rotas HTTP:** GET, POST, PUT, PATCH e DELETE.
+- **WebSocket:** comunicação bidireccional em tempo real, com mensagens de texto e binárias, parâmetros dinâmicos nas rotas, encerramento de ligações e controlo do handshake através de middleware global. Registo através de `App::ws`.
 - **Grupos de rotas:** agrupamento de rotas com prefixos, suporte a grupos aninhados e middleware específico por grupo.
 - **Parâmetros dinâmicos:** padrões como `/utilizadores/:id`.
 - **Query strings:** consulta de parâmetros como `?pagina=2&limite=10`.
@@ -288,6 +289,87 @@ O tipo `Response` disponibiliza métodos para construir respostas HTTP:
 **Nota sobre JSON:** o método `.json(...)` recebe conteúdo em formato textual. Para converter estruturas Rust em JSON, pode utilizar `serde_json::json!(...).to_string()`.
 
 **Nota sobre cookies:** os métodos `cookie()` e `remove_cookie()` recebem uma configuração `SessionConfig` e devolvem um `Result`, permitindo detectar erros na criação dos cabeçalhos.
+
+## Comunicação WebSocket
+
+O RustPress suporta comunicação bidireccional em tempo real através do protocolo **WebSocket**. Esta funcionalidade permite estabelecer ligações persistentes entre clientes e servidores, possibilitando a troca de mensagens sem necessidade de efectuar novos pedidos HTTP.
+
+As rotas WebSocket são registadas através do método `App::ws()`.
+
+### Criar uma rota WebSocket
+
+O exemplo seguinte implementa um servidor echo: todas as mensagens de texto recebidas são devolvidas ao cliente.
+
+```rust
+use rustpress_web::{App, Message, Request, WebSocket};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut app = App::new();
+
+    app.ws("/ws", |_request: Request, mut websocket: WebSocket| async move {
+        loop {
+            match websocket.recv().await {
+                Ok(Some(Message::Text(text))) => {
+                    if websocket.send(Message::Text(text)).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(Some(Message::Close)) | Ok(None) => {
+                    break;
+                }
+                Ok(Some(_)) => {}
+                Err(error) => {
+                    eprintln!("Erro WebSocket: {error}");
+                    break;
+                }
+            }
+        }
+    })?;
+
+    app.listen("127.0.0.1:3000").await?;
+
+    Ok(())
+}
+```
+
+Guarde o código em `examples/websocket.rs` e execute-o com:
+
+```bash
+cargo run --example websocket
+```
+
+O servidor ficará disponível em `127.0.0.1:3000`, aguardando ligações WebSocket no caminho `/ws`.
+
+### API WebSocket
+
+O RustPress disponibiliza os seguintes tipos e métodos:
+
+| Elemento | Descrição |
+|---|---|
+| `App::ws(path, handler)` | Regista uma rota WebSocket. |
+| `WebSocket::send(message)` | Envia uma mensagem. |
+| `WebSocket::recv()` | Recebe a próxima mensagem. |
+| `WebSocket::close()` | Encerra a ligação de forma controlada. |
+| `Message::Text(String)` | Mensagem de texto UTF-8. |
+| `Message::Binary(Vec<u8>)` | Mensagem binária. |
+| `Message::Ping(Vec<u8>)` | Mensagem de controlo Ping. |
+| `Message::Pong(Vec<u8>)` | Mensagem de controlo Pong. |
+| `Message::Close` | Mensagem de encerramento. |
+| `WebSocketError` | Tipo de erro das operações WebSocket. |
+
+O método `recv()` devolve `Result<Option<Message>, WebSocketError>`. Quando recebe uma mensagem de encerramento, devolve `Ok(Some(Message::Close))`. Quando o fluxo termina sem outra mensagem, devolve `Ok(None)`.
+
+### Funcionalidades suportadas
+
+- Handshake e actualização de pedidos HTTP para WebSocket.
+- Comunicação através de mensagens de texto e binárias.
+- Mensagens de controlo Ping e Pong.
+- Rotas com parâmetros dinâmicos, como `/ws/:id`.
+- Execução dos middlewares globais antes da aceitação da ligação.
+- Encerramento controlado e detecção de desconexões.
+
+**Nota:** os middlewares globais podem rejeitar o handshake antes de a ligação WebSocket ser estabelecida.
 
 ## Segurança de palavras-passe
 
@@ -1301,7 +1383,6 @@ cargo check --examples
 Apesar das funcionalidades já implementadas, algumas áreas ainda podem ser desenvolvidas:
 
 - **Integração com bases de dados:** suporte integrado para acesso e gestão de bases de dados.
-- **WebSocket:** suporte à comunicação bidireccional em tempo real.
 
 Estas funcionalidades fazem parte das possíveis evoluções do RustPress Web e deverão ser acompanhadas de APIs e testes próprios.
 

@@ -34,41 +34,60 @@ pub(crate) async fn serve(
     logger: Logger,
 ) -> Result<(), ServerError> {
     loop {
-        let (stream, _) = listener.accept().await?;
+        tokio::select! {
+            result = listener.accept() => {
+                let (stream, _) = result?;
 
-        let router = router.clone();
-        let logger = logger.clone();
-        let connection_logger = logger.clone();
-
-        tokio::spawn(async move {
-            let io = TokioIo::new(stream);
-
-            let service = service_fn(move |request| {
                 let router = router.clone();
                 let logger = logger.clone();
+                let connection_logger = logger.clone();
 
-                async move {
-                    let method = request.method().clone();
-                    let path = request.uri().path().to_owned();
-                    let start = Instant::now();
+                tokio::spawn(async move {
+                    let io = TokioIo::new(stream);
 
-                    let response = router.handle(request).await;
+                    let service = service_fn(move |request| {
+                        let router = router.clone();
+                        let logger = logger.clone();
 
-                    logger.info(&format!(
-                        "{} {} → {} ({} ms)",
-                        method,
-                        path,
-                        response.status().as_u16(),
-                        start.elapsed().as_millis()
-                    ));
+                        async move {
+                            let method = request.method().clone();
+                            let path = request.uri().path().to_owned();
+                            let start = Instant::now();
 
-                    Ok::<_, Infallible>(response)
-                }
-            });
+                            let response = router.handle(request).await;
 
-            if let Err(error) = http1::Builder::new().serve_connection(io, service).await {
-                connection_logger.error(&format!("Error in HTTP connection: {error}"));
+                            logger.info(&format!(
+                                "{} {} → {} ({} ms)",
+                                method,
+                                path,
+                                response.status().as_u16(),
+                                start.elapsed().as_millis()
+                            ));
+
+                            Ok::<_, Infallible>(response)
+                        }
+                    });
+
+                    if let Err(error) = http1::Builder::new()
+                        .serve_connection(io, service)
+                        .with_upgrades()
+                        .await
+                    {
+                        connection_logger
+                            .error(&format!("Error in HTTP connection: {error}"));
+                    }
+                });
             }
-        });
+
+            result = tokio::signal::ctrl_c() => {
+                result?;
+
+                logger.info("Ctrl+C received. Shutting down server gracefully.");
+
+                break;
+            }
+        }
     }
+
+    Ok(())
 }

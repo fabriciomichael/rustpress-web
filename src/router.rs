@@ -5,6 +5,8 @@
 //! erros para o handler global configurado em [`crate::App`].
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
+    pin::Pin,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -13,7 +15,9 @@ use bytes::{Bytes, BytesMut};
 use http_body_util::BodyExt;
 use http_body_util::Full;
 use hyper::{
-    Request as HyperRequest, Response as HyperResponse, body::Incoming, header::CONTENT_TYPE,
+    Request as HyperRequest, Response as HyperResponse, StatusCode,
+    body::Incoming,
+    header::{CONTENT_TYPE, HeaderValue},
     http::Method,
 };
 
@@ -35,6 +39,13 @@ const MAX_BODY_SIZE: usize = 1024 * 1024;
 pub(crate) type Handler =
     Arc<dyn Fn(Request, Response) -> Result<Response, HandlerError> + Send + Sync>;
 
+/// Future devolvida por um handler WebSocket.
+pub(crate) type WebSocketFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+/// Handler responsável por processar uma ligação WebSocket.
+pub(crate) type WebSocketHandler =
+    Arc<dyn Fn(Request, crate::WebSocket) -> WebSocketFuture + Send + Sync>;
+
 #[derive(Clone)]
 struct RouteEntry {
     handler: Handler,
@@ -42,6 +53,7 @@ struct RouteEntry {
 }
 
 type MatchedRoute = (String, RouteEntry, Vec<(String, String)>);
+type MatchedWebSocketRoute = (String, WebSocketHandler, Vec<(String, String)>);
 
 /// Tipo que representa o handler global de erros.
 type ErrorHandler = Arc<dyn Fn(&HandlerError, &crate::RequestContext) -> Response + Send + Sync>;
@@ -70,6 +82,8 @@ struct SessionState {
 #[derive(Clone, Default)]
 pub(crate) struct Router {
     routes: HashMap<RouteKey, RouteEntry>,
+    websocket_routes: HashMap<String, WebSocketHandler>,
+
     middlewares: Vec<Middleware>,
     error_handler: Option<ErrorHandler>,
 
@@ -132,6 +146,31 @@ impl Router {
                 middlewares: Vec::new(),
             },
         );
+
+        Ok(())
+    }
+
+    /// Regista uma nova rota WebSocket.
+    ///
+    /// O path deve ser único entre as rotas WebSocket.
+    pub(crate) fn add_websocket<F, Fut>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, crate::WebSocket) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        Self::validate_route(path)?;
+
+        if self.websocket_routes.contains_key(path) {
+            return Err(format!(
+                "Já existe uma rota WebSocket registada para o caminho '{path}'."
+            ));
+        }
+
+        let handler = Arc::new(move |request, websocket| {
+            Box::pin(handler(request, websocket)) as WebSocketFuture
+        });
+
+        self.websocket_routes.insert(path.to_owned(), handler);
 
         Ok(())
     }
@@ -360,6 +399,205 @@ impl Router {
         None
     }
 
+    fn find_websocket_route(&self, path: &str) -> Option<MatchedWebSocketRoute> {
+        self.websocket_routes
+            .iter()
+            .filter_map(|(route_path, handler)| {
+                Self::match_path(route_path, path)
+                    .map(|params| (route_path.clone(), handler.clone(), params))
+            })
+            .max_by(|(path_a, _, _), (path_b, _, _)| {
+                Self::route_specificity(path_a)
+                    .cmp(&Self::route_specificity(path_b))
+                    .then_with(|| path_a.cmp(path_b))
+            })
+    }
+
+    /// Processa um pedido de upgrade para uma rota WebSocket.
+    async fn handle_websocket(
+        &self,
+        mut incoming: HyperRequest<Incoming>,
+        matched: MatchedWebSocketRoute,
+    ) -> HyperResponse<Full<Bytes>> {
+        let (route_path, handler, params) = matched;
+
+        let method = incoming.method().clone();
+        let uri = incoming.uri().clone();
+        let version = incoming.version();
+        let headers = incoming.headers().clone();
+
+        // Cria o pedido interno preservando os metadados HTTP.
+        let mut builder = HyperRequest::builder()
+            .method(method)
+            .uri(uri)
+            .version(version);
+
+        if let Some(target_headers) = builder.headers_mut() {
+            target_headers.extend(headers.clone());
+        }
+
+        let inner = match builder.body(Bytes::new()) {
+            Ok(request) => request,
+            Err(_) => {
+                return HyperResponse::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Full::new(Bytes::new()))
+                    .unwrap_or_else(|_| HyperResponse::new(Full::new(Bytes::new())));
+            }
+        };
+
+        let mut request = Request::new(inner, params);
+        let context = request.context();
+
+        // Carrega a sessão associada ao pedido.
+        let session_id = self.extract_session_id(&headers);
+
+        let session = match self.load_session(session_id.as_deref()) {
+            Ok(session) => session,
+            Err(error) => {
+                let handler_error = HandlerError::with_status_and_details(
+                    500,
+                    "Não foi possível carregar a sessão.",
+                    error.to_string(),
+                )
+                .with_source(error);
+
+                return self.handle_error(&handler_error, &context).into_hyper();
+            }
+        };
+
+        if let Some(session) = session {
+            request.set_session(session);
+        }
+
+        // Executa os middlewares globais.
+        for middleware in &self.middlewares {
+            let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                middleware(&request)
+            })) {
+                Ok(result) => result,
+                Err(payload) => {
+                    let message = extract_panic_message(payload.as_ref());
+
+                    MiddlewareResult::Error(HandlerError::with_details(
+                        "Ocorreu um erro interno no servidor.",
+                        format!("Panic no middleware: {message}"),
+                    ))
+                }
+            };
+
+            match result {
+                MiddlewareResult::Next => {}
+
+                MiddlewareResult::Respond(response) => {
+                    return self.finalize_or_error_response(response, request.session(), &context);
+                }
+
+                MiddlewareResult::Error(error) => {
+                    let response = self.handle_error(&error, &context);
+
+                    return self.finalize_or_error_response(response, request.session(), &context);
+                }
+            }
+        }
+
+        // Valida e prepara o handshake WebSocket.
+        let (mut handshake, upgrade) = match hyper_tungstenite::upgrade(&mut incoming, None) {
+            Ok(result) => result,
+            Err(_) => {
+                return HyperResponse::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Full::new(Bytes::new()))
+                    .unwrap_or_else(|_| HyperResponse::new(Full::new(Bytes::new())));
+            }
+        };
+
+        // Prepara e persiste a sessão antes de enviar o cookie.
+        if let (Some(session), Some(session_state)) = (request.session(), self.session.as_ref()) {
+            let cookie_header = {
+                let mut session = match session.lock() {
+                    Ok(session) => session,
+                    Err(_) => {
+                        let error =
+                            HandlerError::with_status(500, "Não foi possível aceder à sessão.");
+                        return self.handle_error(&error, &context).into_hyper();
+                    }
+                };
+
+                session.mark_modified();
+
+                if let Err(error) = session_state.manager.save(&session) {
+                    let handler_error = HandlerError::with_status_and_details(
+                        500,
+                        "Não foi possível guardar a sessão.",
+                        error.to_string(),
+                    )
+                    .with_source(error);
+
+                    return self.handle_error(&handler_error, &context).into_hyper();
+                }
+
+                let cookie = Cookie::new(
+                    session_state.config.cookie_name.clone(),
+                    session.id().to_string(),
+                );
+
+                match cookie.to_set_cookie(&session_state.config) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let handler_error = HandlerError::with_status_and_details(
+                            500,
+                            "Não foi possível criar o cookie da sessão.",
+                            error.to_string(),
+                        )
+                        .with_source(error);
+
+                        return self.handle_error(&handler_error, &context).into_hyper();
+                    }
+                }
+            };
+
+            match HeaderValue::from_str(&cookie_header) {
+                Ok(value) => {
+                    handshake
+                        .headers_mut()
+                        .insert(hyper::header::SET_COOKIE, value);
+                }
+                Err(_) => {
+                    let error = HandlerError::with_status(
+                        500,
+                        "Não foi possível preparar o cookie da sessão.",
+                    );
+                    return self.handle_error(&error, &context).into_hyper();
+                }
+            }
+        }
+
+        // Guarda as referências necessárias para persistir a sessão
+        // quando o handler WebSocket terminar.
+        let session = request.session();
+        let manager = self
+            .session
+            .as_ref()
+            .map(|state| Arc::clone(&state.manager));
+
+        tokio::spawn(async move {
+            if let Ok(websocket) = crate::WebSocket::from_upgrade(upgrade).await {
+                handler(request, websocket).await;
+
+                if let (Some(session), Some(manager)) = (session, manager) {
+                    if let Ok(session) = session.lock() {
+                        let _ = manager.save(&session);
+                    }
+                }
+            }
+        });
+
+        let _ = route_path;
+
+        handshake
+    }
+
     fn error_response(&self, code: u16) -> Response {
         let mut context = TemplateContext::new();
 
@@ -392,6 +630,15 @@ impl Router {
         &self,
         request: HyperRequest<Incoming>,
     ) -> HyperResponse<Full<Bytes>> {
+        // Intercepta pedidos de upgrade destinados a rotas WebSocket.
+        if hyper_tungstenite::is_upgrade_request(&request) {
+            let path = request.uri().path().to_owned();
+
+            if let Some(matched) = self.find_websocket_route(&path) {
+                return self.handle_websocket(request, matched).await;
+            }
+        }
+
         let (parts, incoming_body) = request.into_parts();
 
         let method = parts.method.clone();
@@ -1577,5 +1824,38 @@ mod tests {
             extract_panic_message(payload.as_ref()),
             "O panic contém um payload desconhecido."
         );
+    }
+
+    #[test]
+    fn finds_websocket_route_with_dynamic_parameter() {
+        let mut router = Router::new();
+
+        router.add_websocket("/ws/:id", |_, _| async {}).unwrap();
+
+        let matched = router.find_websocket_route("/ws/123");
+
+        assert!(matched.is_some());
+
+        let (route_path, _, params) = matched.unwrap();
+
+        assert_eq!(route_path, "/ws/:id");
+        assert_eq!(params, vec![("id".to_string(), "123".to_string())]);
+    }
+
+    #[test]
+    fn static_websocket_route_has_priority_over_dynamic_route() {
+        let mut router = Router::new();
+
+        router.add_websocket("/ws/:id", |_, _| async {}).unwrap();
+
+        router.add_websocket("/ws/chat", |_, _| async {}).unwrap();
+
+        let matched = router.find_websocket_route("/ws/chat");
+
+        assert!(matched.is_some());
+
+        let (route_path, _, _) = matched.unwrap();
+
+        assert_eq!(route_path, "/ws/chat");
     }
 }

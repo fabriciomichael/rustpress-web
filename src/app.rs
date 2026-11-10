@@ -21,6 +21,7 @@ use crate::{
 
 use std::{
     fs,
+    future::Future,
     path::{Component, PathBuf},
     sync::Arc,
 };
@@ -311,6 +312,18 @@ impl App {
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
     {
         self.router.add_fallible(Method::POST, path, handler)
+    }
+
+    /// Regista uma nova rota WebSocket.
+    ///
+    /// O handler é executado de forma assíncrona após o estabelecimento
+    /// da ligação WebSocket.
+    pub fn ws<F, Fut>(&mut self, path: &str, handler: F) -> Result<(), String>
+    where
+        F: Fn(Request, crate::WebSocket) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.router.add_websocket(path, handler)
     }
 
     /// Inicia o servidor HTTP na interface e porta indicadas.

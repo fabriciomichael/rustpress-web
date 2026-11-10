@@ -93,6 +93,7 @@ pub mod security;
 mod server;
 pub mod session;
 mod template;
+mod websocket;
 
 /// Funcionalidades de recepção e configuração de ficheiros enviados.
 pub mod upload;
@@ -104,3 +105,4 @@ pub use middleware::{AuthMiddleware, CsrfMiddleware, MiddlewareResult, RoleMiddl
 pub use request::{Request, RequestContext};
 pub use response::Response;
 pub use template::{TemplateContext, TemplateError};
+pub use websocket::{Message, WebSocket, WebSocketError};
