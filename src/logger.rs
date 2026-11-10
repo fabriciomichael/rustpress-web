@@ -13,6 +13,7 @@
 //! logger.warn("Configuração opcional ausente");
 //! ```
 
+use is_terminal::IsTerminal;
 use std::sync::{
     Arc,
     atomic::{AtomicU8, Ordering},
@@ -76,9 +77,15 @@ impl Logger {
             Level::Error => ("ERROR", "\x1b[31m"),
         };
 
-        let reset = "\x1b[0m";
-
-        let output = format!("[{timestamp}] {color}[{name}]{reset} {message}");
+        let output = match level {
+            Level::Debug | Level::Info if std::io::stdout().is_terminal() => {
+                format!("[{timestamp}] {color}[{name}]\x1b[0m {message}")
+            }
+            Level::Warn | Level::Error if std::io::stderr().is_terminal() => {
+                format!("[{timestamp}] {color}[{name}]\x1b[0m {message}")
+            }
+            _ => format!("[{timestamp}] [{name}] {message}"),
+        };
 
         match level {
             Level::Debug | Level::Info => println!("{output}"),
