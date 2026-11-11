@@ -1,6 +1,6 @@
 [package]
 name = "rustpress-web"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "A lightweight HTTP framework for Rust inspired by Express.js"
 license = "MIT"
@@ -27,6 +27,7 @@ multer = "3"
 futures-util = "0.3.34"
 hyper-tungstenite = "0.30.0"
 is-terminal = "0.4.17"
+fs2 = "0.4.3"
 
 [dev-dependencies]
 tokio-tungstenite = "0.30.0"

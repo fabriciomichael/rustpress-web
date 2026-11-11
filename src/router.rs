@@ -591,10 +591,10 @@ impl Router {
             if let Ok(websocket) = crate::WebSocket::from_upgrade(upgrade).await {
                 handler(request, websocket).await;
 
-                if let (Some(session), Some(manager)) = (session, manager) {
-                    if let Ok(session) = session.lock() {
-                        let _ = manager.save(&session);
-                    }
+                if let (Some(session), Some(manager)) = (session, manager)
+                    && let Ok(session) = session.lock()
+                {
+                    let _ = manager.save(&session);
                 }
             }
         });

@@ -104,6 +104,7 @@ struct FileStoreData {
 /// Armazenamento persistente de sessões em ficheiro JSON.
 pub struct FileStore {
     path: PathBuf,
+    lock_path: PathBuf,
     state: Mutex<FileStoreData>,
 }
 
@@ -125,15 +126,92 @@ impl FileStore {
         cutoff: SystemTime,
     ) -> Result<Self, SessionStoreError> {
         let path = path.as_ref().to_path_buf();
+        let lock_path = path.with_extension("lock");
+        let _file_lock = Self::acquire_file_lock(&lock_path)?;
 
         Self::cleanup_temporary_files(&path, cutoff)?;
 
-        let state = match fs::read(&path) {
-            Ok(contents) => serde_json::from_slice(&contents)
-                .map_err(|error| SessionStoreError::Serialization(error.to_string()))?,
+        let state = Self::load_state(&path)?;
+
+        Ok(Self {
+            path,
+            lock_path,
+            state: Mutex::new(state),
+        })
+    }
+
+    /// Adquire um bloqueio exclusivo sobre o ficheiro auxiliar.
+    fn acquire_file_lock(lock_path: &Path) -> Result<fs::File, SessionStoreError> {
+        use fs2::FileExt;
+
+        if let Some(parent) = lock_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).map_err(|error| SessionStoreError::Io(error.to_string()))?;
+        }
+
+        let lock_file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)
+            .map_err(|error| SessionStoreError::Io(error.to_string()))?;
+
+        lock_file
+            .lock_exclusive()
+            .map_err(|error| SessionStoreError::Io(error.to_string()))?;
+
+        Ok(lock_file)
+    }
+
+    /// Carrega o estado persistido, recuperando um backup quando necessário.
+    fn load_state(path: &Path) -> Result<FileStoreData, SessionStoreError> {
+        let state = match fs::read(path) {
+            Ok(contents) => match serde_json::from_slice(&contents) {
+                Ok(state) => state,
+
+                Err(error) => {
+                    let original_error = SessionStoreError::Serialization(error.to_string());
+
+                    // Preservar o ficheiro principal corrompido.
+                    let corrupt_path =
+                        path.with_extension(format!("corrupt-{}", uuid::Uuid::new_v4()));
+
+                    fs::rename(path, &corrupt_path)
+                        .map_err(|error| SessionStoreError::Io(error.to_string()))?;
+
+                    match Self::recover_backup(path) {
+                        Ok(Some(state)) => state,
+
+                        Ok(None) => {
+                            fs::rename(&corrupt_path, path).map_err(|restore_error| {
+                                SessionStoreError::Io(format!(
+                                    "Não foi possível restaurar o ficheiro corrompido: {restore_error}"
+                                ))
+                            })?;
+
+                            return Err(original_error);
+                        }
+
+                        Err(recovery_error) => {
+                            fs::rename(&corrupt_path, path).map_err(|restore_error| {
+                                SessionStoreError::Io(format!(
+                                    "Falha na recuperação ({recovery_error}). \
+                                     Também não foi possível restaurar o ficheiro original: \
+                                     {restore_error}"
+                                ))
+                            })?;
+
+                            return Err(recovery_error);
+                        }
+                    }
+                }
+            },
 
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Self::recover_backup(&path)?.unwrap_or_default()
+                Self::recover_backup(path)?.unwrap_or_default()
             }
 
             Err(error) => {
@@ -141,11 +219,9 @@ impl FileStore {
             }
         };
 
-        Ok(Self {
-            path,
-            state: Mutex::new(state),
-        })
+        Ok(state)
     }
+
     /// Procura e recupera uma cópia de segurança.
     fn recover_backup(path: &Path) -> Result<Option<FileStoreData>, SessionStoreError> {
         let parent = path
@@ -177,7 +253,9 @@ impl FileStore {
         for entry in entries {
             let entry = entry.map_err(|error| SessionStoreError::Io(error.to_string()))?;
 
-            if entry.file_name().to_string_lossy().starts_with(&prefix) {
+            if entry.file_name().to_string_lossy().starts_with(&prefix)
+                && entry.file_type().is_ok_and(|file_type| file_type.is_file())
+            {
                 backups.push(entry.path());
             }
         }
@@ -211,8 +289,10 @@ impl FileStore {
             };
 
             // Só restaura uma cópia depois de confirmar que é válida.
-            fs::rename(&backup_path, path)
-                .map_err(|error| SessionStoreError::Io(error.to_string()))?;
+            if let Err(error) = fs::rename(&backup_path, path) {
+                last_error = Some(SessionStoreError::Io(error.to_string()));
+                continue;
+            }
 
             return Ok(Some(state));
         }
@@ -285,27 +365,26 @@ impl FileStore {
 
         drop(temp_file);
 
-        let has_original = self.path.exists();
+        let has_original = self
+            .path
+            .try_exists()
+            .map_err(|error| SessionStoreError::Io(error.to_string()))?;
 
-        if has_original {
-            if let Err(error) = fs::rename(&self.path, &backup_path) {
-                let _ = fs::remove_file(&temp_path);
-                return Err(SessionStoreError::Io(error.to_string()));
-            }
+        if has_original && let Err(error) = fs::rename(&self.path, &backup_path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(SessionStoreError::Io(error.to_string()));
         }
 
         if let Err(error) = fs::rename(&temp_path, &self.path) {
             let replacement_error = error.to_string();
 
-            if has_original {
-                if let Err(restore_error) = fs::rename(&backup_path, &self.path) {
-                    let _ = fs::remove_file(&temp_path);
+            if has_original && let Err(restore_error) = fs::rename(&backup_path, &self.path) {
+                let _ = fs::remove_file(&temp_path);
 
-                    return Err(SessionStoreError::Io(format!(
-                        "Failed to replace session file: {replacement_error}. \
-                         Failed to restore original file: {restore_error}"
-                    )));
-                }
+                return Err(SessionStoreError::Io(format!(
+                    "Failed to replace session file: {replacement_error}. \
+                    Failed to restore original file: {restore_error}"
+                )));
             }
 
             let _ = fs::remove_file(&temp_path);
@@ -351,7 +430,11 @@ impl FileStore {
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        let mut next_state = state.clone();
+        // Bloqueia o acesso ao ficheiro entre diferentes instâncias.
+        let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
+
+        // Obtém sempre a versão mais recente do disco.
+        let mut next_state = Self::load_state(&self.path)?;
 
         let now = Self::unix_timestamp()?;
         let removed = Self::cleanup_expired(&mut next_state, now);
@@ -363,8 +446,10 @@ impl FileStore {
 
         if removed > 0 {
             self.persist(&next_state)?;
-            *state = next_state;
         }
+
+        // Actualiza a cópia local, mesmo quando não houve limpeza.
+        *state = next_state;
 
         Ok(data)
     }
@@ -376,19 +461,20 @@ impl FileStore {
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        let mut next_state = state.clone();
-        let now = Self::unix_timestamp()?;
+        let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
 
+        let mut next_state = Self::load_state(&self.path)?;
+
+        let now = Self::unix_timestamp()?;
         let removed = Self::cleanup_expired(&mut next_state, now);
 
-        // Persiste a limpeza antes de verificar o novo identificador.
-        if removed > 0 {
-            self.persist(&next_state)?;
-            *state = next_state.clone();
-        }
-
-        // Impede a reutilização de identificadores revogados.
         if next_state.revoked.contains_key(&session_id) {
+            if removed > 0 {
+                self.persist(&next_state)?;
+            }
+
+            *state = next_state;
+
             return Err(SessionStoreError::RevokedSession);
         }
 
@@ -400,7 +486,6 @@ impl FileStore {
             },
         );
 
-        // Só actualiza o estado activo depois de persistir com sucesso.
         self.persist(&next_state)?;
         *state = next_state;
 
@@ -421,17 +506,22 @@ impl FileStore {
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        let mut next_state = state.clone();
-        let now = Self::unix_timestamp()?;
+        // Bloqueia o acesso ao ficheiro entre diferentes instâncias.
+        let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
 
+        // Obtém sempre a versão mais recente do disco.
+        let mut next_state = Self::load_state(&self.path)?;
+
+        let now = Self::unix_timestamp()?;
         let removed = Self::cleanup_expired(&mut next_state, now);
 
-        if removed > 0 {
-            self.persist(&next_state)?;
-            *state = next_state.clone();
-        }
-
         if next_state.revoked.contains_key(&session_id) {
+            if removed > 0 {
+                self.persist(&next_state)?;
+            }
+
+            *state = next_state;
+
             return Err(SessionStoreError::RevokedSession);
         }
 
@@ -456,7 +546,11 @@ impl FileStore {
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        let mut next_state = state.clone();
+        // Bloqueia o acesso ao ficheiro entre diferentes instâncias.
+        let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
+
+        // Obtém sempre a versão mais recente do disco.
+        let mut next_state = Self::load_state(&self.path)?;
 
         let now = Self::unix_timestamp()?;
         Self::cleanup_expired(&mut next_state, now);
@@ -478,7 +572,11 @@ impl FileStore {
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        let mut next_state = state.clone();
+        // Bloqueia o acesso ao ficheiro entre diferentes instâncias.
+        let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
+
+        // Obtém sempre a versão mais recente do disco.
+        let mut next_state = Self::load_state(&self.path)?;
 
         let now = Self::unix_timestamp()?;
         Self::cleanup_expired(&mut next_state, now);
@@ -506,7 +604,11 @@ impl FileStore {
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        let mut next_state = state.clone();
+        // Bloqueia o acesso ao ficheiro entre diferentes instâncias.
+        let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
+
+        // Obtém sempre a versão mais recente do disco.
+        let mut next_state = Self::load_state(&self.path)?;
 
         let now = Self::unix_timestamp()?;
         Self::cleanup_expired(&mut next_state, now);
@@ -1408,6 +1510,109 @@ mod tests {
     }
 
     #[test]
+    fn file_store_recovers_from_backup_when_main_file_is_corrupted() {
+        let path = std::env::temp_dir().join(format!(
+            "rustpress-recovery-main-corrupt-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        let backup_path = path.with_extension("backup-valid");
+        let session_id = "main-corrupt-session";
+
+        // Criar e persistir uma sessão.
+        {
+            let store = FileStore::new(&path).unwrap();
+
+            store
+                .set_session(session_id.to_string(), json!({"username": "fabricio"}))
+                .unwrap();
+        }
+
+        // Simular a existência de um backup válido.
+        std::fs::rename(&path, &backup_path).unwrap();
+
+        // Criar um ficheiro principal corrompido.
+        std::fs::write(&path, b"{ invalid json").unwrap();
+
+        // O armazenamento deverá recuperar o backup.
+        {
+            let store = FileStore::new(&path).unwrap();
+
+            let data = store.get_session(session_id).unwrap().unwrap();
+
+            assert_eq!(data["username"], "fabricio");
+            assert!(path.exists());
+            assert!(!backup_path.exists());
+        }
+
+        // Localizar o ficheiro corrompido preservado.
+        let corrupt_prefix = format!("{}.corrupt-", path.file_stem().unwrap().to_string_lossy());
+
+        let corrupt_path = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|candidate| {
+                candidate
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with(&corrupt_prefix))
+            })
+            .expect("O ficheiro corrompido deveria continuar preservado");
+
+        // Confirmar que o conteúdo original não foi alterado.
+        assert_eq!(std::fs::read(&corrupt_path).unwrap(), b"{ invalid json");
+
+        // Limpar os ficheiros do teste.
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(backup_path);
+        let _ = std::fs::remove_file(corrupt_path);
+    }
+
+    #[test]
+    fn file_store_ignores_directories_during_backup_recovery() {
+        let path = std::env::temp_dir().join(format!(
+            "rustpress-recovery-directory-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        let directory_backup = path.with_extension("backup-directory");
+        let valid_backup = path.with_extension("backup-valid");
+
+        let session_id = "directory-recovery-session";
+
+        // Criar e persistir uma sessão.
+        {
+            let store = FileStore::new(&path).unwrap();
+
+            store
+                .set_session(session_id.to_string(), json!({"username": "fabricio"}))
+                .unwrap();
+        }
+
+        // Simular uma interrupção: mover o ficheiro principal para backup.
+        std::fs::rename(&path, &valid_backup).unwrap();
+
+        // Criar um directório com o prefixo reservado aos backups.
+        std::fs::create_dir(&directory_backup).unwrap();
+
+        // O armazenamento deve ignorar o directório e recuperar o ficheiro válido.
+        {
+            let store = FileStore::new(&path).unwrap();
+
+            let data = store.get_session(session_id).unwrap().unwrap();
+
+            assert_eq!(data["username"], "fabricio");
+            assert!(path.exists());
+            assert!(!valid_backup.exists());
+            assert!(directory_backup.exists());
+        }
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir(directory_backup);
+        let _ = std::fs::remove_file(valid_backup);
+    }
+
+    #[test]
     fn file_store_skips_corrupted_backup_during_recovery() {
         let path = std::env::temp_dir().join(format!(
             "rustpress-recovery-corrupt-{}.json",
@@ -1595,6 +1800,48 @@ mod tests {
     }
 
     #[test]
+    fn file_store_independent_instances_preserve_revocations() {
+        let path = std::env::temp_dir().join(format!(
+            "rustpress-independent-revocation-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        let store_a = FileStore::new(&path).unwrap();
+        let store_b = FileStore::new(&path).unwrap();
+
+        let session_id = "shared-revoked-session";
+
+        // A primeira instância cria a sessão.
+        store_a
+            .set_session(session_id.to_string(), json!({"user": "A"}))
+            .unwrap();
+
+        // A segunda instância revoga permanentemente a sessão.
+        store_b.revoke_session(session_id).unwrap();
+
+        // A primeira instância não deve conseguir reutilizar o identificador.
+        let result = store_a.set_session(session_id.to_string(), json!({"user": "B"}));
+
+        assert_eq!(result, Err(SessionStoreError::RevokedSession));
+
+        assert!(store_a.get_session(session_id).unwrap().is_none());
+
+        // Uma terceira instância confirma a persistência da revogação.
+        let reopened = FileStore::new(&path).unwrap();
+
+        let result = reopened.set_session(session_id.to_string(), json!({"user": "C"}));
+
+        assert_eq!(result, Err(SessionStoreError::RevokedSession));
+
+        drop(reopened);
+        drop(store_a);
+        drop(store_b);
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("lock"));
+    }
+
+    #[test]
     fn file_store_persists_temporary_revocation_after_reopening() {
         let path = std::env::temp_dir().join(format!(
             "rustpress-temporary-revocation-{}.json",
@@ -1677,5 +1924,312 @@ mod tests {
 
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_file(temp_path);
+    }
+
+    #[test]
+    fn file_store_preserves_corrupted_main_file_without_valid_backup() {
+        let path = std::env::temp_dir().join(format!(
+            "rustpress-recovery-no-backup-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        let corrupted_content = b"{ invalid json";
+
+        // Criar um ficheiro principal corrompido.
+        std::fs::write(&path, corrupted_content).unwrap();
+
+        // Tentar abrir o FileStore.
+        let result = FileStore::new(&path);
+
+        // Deve devolver um erro de serialização.
+        assert!(matches!(result, Err(SessionStoreError::Serialization(_))));
+
+        // O ficheiro original deve continuar no caminho principal.
+        assert!(path.exists());
+
+        // O conteúdo original deve permanecer intacto.
+        assert_eq!(std::fs::read(&path).unwrap(), corrupted_content);
+
+        // Limpar o ficheiro do teste.
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn file_store_preserves_corrupted_main_and_backups_when_all_are_invalid() {
+        let path = std::env::temp_dir().join(format!(
+            "rustpress-recovery-all-corrupt-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        let backup_path = path.with_extension("backup-invalid");
+        let main_content = b"{ invalid main json";
+        let backup_content = b"{ invalid backup json";
+
+        // Criar o ficheiro principal corrompido.
+        std::fs::write(&path, main_content).unwrap();
+
+        // Criar um backup também corrompido.
+        std::fs::write(&backup_path, backup_content).unwrap();
+
+        // Tentar abrir o armazenamento.
+        let result = FileStore::new(&path);
+
+        // Deve devolver um erro de serialização.
+        assert!(matches!(result, Err(SessionStoreError::Serialization(_))));
+
+        // O ficheiro principal original deve ser restaurado.
+        assert!(path.exists());
+        assert_eq!(std::fs::read(&path).unwrap(), main_content);
+
+        // O backup inválido também deve continuar preservado.
+        assert!(backup_path.exists());
+        assert_eq!(std::fs::read(&backup_path).unwrap(), backup_content);
+
+        // Limpar os ficheiros do teste.
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(backup_path);
+    }
+
+    #[test]
+    fn file_store_preserves_backup_when_restoration_fails() {
+        let path = std::env::temp_dir().join(format!(
+            "rustpress-recovery-rename-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        let backup_path = path.with_extension("backup-valid");
+
+        // Criar um destino que impeça a restauração de um ficheiro.
+        std::fs::create_dir(&path).unwrap();
+
+        // Criar um backup JSON válido.
+        std::fs::write(
+            &backup_path,
+            serde_json::to_vec(&FileStoreData::default()).unwrap(),
+        )
+        .unwrap();
+
+        // Tentar recuperar o backup.
+        let result = FileStore::recover_backup(&path);
+
+        // A restauração deve falhar com erro de I/O.
+        assert!(matches!(result, Err(SessionStoreError::Io(_))));
+
+        // O backup deve permanecer intacto.
+        assert!(backup_path.exists());
+
+        // O destino continua a ser um diretório.
+        assert!(path.is_dir());
+
+        // Limpar os elementos do teste.
+        let _ = std::fs::remove_file(backup_path);
+        let _ = std::fs::remove_dir(path);
+    }
+
+    #[test]
+    fn file_store_preserves_parent_file_when_directory_creation_fails() {
+        let parent = std::env::temp_dir().join(format!(
+            "rustpress-persist-parent-failure-{}.tmp",
+            uuid::Uuid::new_v4()
+        ));
+
+        std::fs::write(&parent, b"parent sentinel").unwrap();
+
+        let path = parent.join("sessions.json");
+
+        let lock_path = path.with_extension("lock");
+
+        let store = FileStore {
+            path,
+            lock_path,
+            state: Mutex::new(FileStoreData::default()),
+        };
+
+        let result = store.persist(&FileStoreData::default());
+
+        assert!(matches!(result, Err(SessionStoreError::Io(_))));
+
+        assert!(parent.is_file());
+        assert_eq!(std::fs::read(&parent).unwrap(), b"parent sentinel");
+
+        let _ = std::fs::remove_file(parent);
+    }
+
+    #[test]
+    fn file_store_preserves_sessions_during_concurrent_writes() {
+        let path = std::env::temp_dir().join(format!(
+            "rustpress-concurrent-store-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        let store = std::sync::Arc::new(FileStore::new(&path).unwrap());
+
+        let workers = 8;
+        let sessions_per_worker = 10;
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(workers));
+
+        let mut handles = Vec::new();
+
+        for worker in 0..workers {
+            let store = std::sync::Arc::clone(&store);
+            let barrier = std::sync::Arc::clone(&barrier);
+
+            let handle = std::thread::spawn(move || {
+                barrier.wait();
+
+                for index in 0..sessions_per_worker {
+                    let session_id = format!("worker-{worker}-session-{index}");
+
+                    store
+                        .set_session(
+                            session_id,
+                            serde_json::json!({
+                                "worker": worker,
+                                "session": index
+                            }),
+                        )
+                        .unwrap();
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        for worker in 0..workers {
+            for index in 0..sessions_per_worker {
+                let session_id = format!("worker-{worker}-session-{index}");
+
+                let session = store.get_session(&session_id).unwrap();
+
+                assert_eq!(
+                    session,
+                    Some(serde_json::json!({
+                        "worker": worker,
+                        "session": index
+                    }))
+                );
+            }
+        }
+
+        assert_eq!(store.state.lock().unwrap().sessions.len(), 80);
+
+        drop(store);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn file_store_preserves_sessions_during_concurrent_independent_writes() {
+        let path = std::env::temp_dir().join(format!(
+            "rustpress-multi-instance-store-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        let workers = 8;
+        let sessions_per_worker = 10;
+
+        // Cada trabalhador terá a sua própria instância do FileStore.
+        let stores: Vec<_> = (0..workers)
+            .map(|_| std::sync::Arc::new(FileStore::new(&path).unwrap()))
+            .collect();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(workers));
+
+        let mut handles = Vec::new();
+
+        for (worker, store) in stores.into_iter().enumerate() {
+            let barrier = std::sync::Arc::clone(&barrier);
+
+            let handle = std::thread::spawn(move || {
+                barrier.wait();
+
+                for index in 0..sessions_per_worker {
+                    let session_id = format!("worker-{worker}-session-{index}");
+
+                    store
+                        .set_session(
+                            session_id,
+                            serde_json::json!({
+                                "worker": worker,
+                                "session": index
+                            }),
+                        )
+                        .unwrap();
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Abre uma nova instância para verificar os dados persistidos.
+        let reopened = FileStore::new(&path).unwrap();
+
+        for worker in 0..workers {
+            for index in 0..sessions_per_worker {
+                let session_id = format!("worker-{worker}-session-{index}");
+
+                let session = reopened.get_session(&session_id).unwrap();
+
+                assert_eq!(
+                    session,
+                    Some(serde_json::json!({
+                        "worker": worker,
+                        "session": index
+                    }))
+                );
+            }
+        }
+
+        assert_eq!(reopened.state.lock().unwrap().sessions.len(), 80);
+
+        drop(reopened);
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("lock"));
+    }
+
+    #[test]
+    fn file_store_independent_instances_preserve_each_others_sessions() {
+        let path = std::env::temp_dir().join(format!(
+            "rustpress-independent-store-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+
+        let store_a = FileStore::new(&path).unwrap();
+        let store_b = FileStore::new(&path).unwrap();
+
+        store_a
+            .set_session("session-a".to_string(), json!({"user": "A"}))
+            .unwrap();
+
+        store_b
+            .set_session("session-b".to_string(), json!({"user": "B"}))
+            .unwrap();
+
+        let reopened = FileStore::new(&path).unwrap();
+
+        assert_eq!(
+            reopened.get_session("session-a").unwrap(),
+            Some(json!({"user": "A"}))
+        );
+
+        assert_eq!(
+            reopened.get_session("session-b").unwrap(),
+            Some(json!({"user": "B"}))
+        );
+        drop(reopened);
+        drop(store_a);
+        drop(store_b);
+
+        let _ = std::fs::remove_file(path);
     }
 }
