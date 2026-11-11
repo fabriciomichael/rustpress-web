@@ -15,7 +15,7 @@ use crate::{
     response::Response,
     router::{Handler, Middleware, Router},
     server,
-    session::{CookieError, SessionConfig},
+    session::{CookieError, SessionConfig, SessionStore},
     upload::{UploadConfig, UploadError},
 };
 
@@ -277,6 +277,24 @@ impl App {
         self.router.enable_sessions(config);
         Ok(())
     }
+
+    /// Activa a gestão de sessões com um armazenamento personalizado.
+    ///
+    /// Permite utilizar qualquer implementação de [`SessionStore`],
+    /// mantendo a configuração dos cookies e o tempo de vida das sessões.
+    pub fn use_session_store<S>(
+        &mut self,
+        config: SessionConfig,
+        store: S,
+    ) -> Result<(), CookieError>
+    where
+        S: SessionStore + 'static,
+    {
+        config.validate()?;
+        self.router.enable_sessions_with_store(config, store);
+        Ok(())
+    }
+
     /// Activa o recebimento de ficheiros através de `multipart/form-data`.
     ///
     /// A configuração é validada antes de ser aplicada à aplicação.

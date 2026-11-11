@@ -73,4 +73,4 @@ pub use config::{SameSite, SessionConfig};
 pub use cookie::{Cookie, CookieError};
 pub use manager::SessionManager;
 pub use session::Session;
-pub use store::{MemoryStore, SessionStore, SessionStoreError};
+pub use store::{FileStore, MemoryStore, SessionStore, SessionStoreError};

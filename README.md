@@ -555,6 +555,44 @@ app.use_sessions(config)?;
 
 Em desenvolvimento local com HTTP, mantenha `secure: false`. Em produção, use HTTPS e active `secure: true`. O armazenamento padrão é em memória: as sessões não sobrevivem ao reinício do processo nem são partilhadas entre várias instâncias da aplicação.
 
+### Armazenamento persistente com FileStore
+
+Além do armazenamento em memória, o RustPress disponibiliza `FileStore`, que guarda os dados das sessões num ficheiro JSON. Assim, as sessões podem ser recuperadas depois de reiniciar a aplicação.
+
+Para utilizar este armazenamento, configure-o através de `App::use_session_store()`:
+
+```rust
+use rustpress_web::{
+    App,
+    session::{FileStore, SessionConfig},
+};
+
+let mut app = App::new();
+
+let store = FileStore::new("storage/sessions.json")?;
+
+app.use_session_store(SessionConfig::default(), store)?;
+```
+
+Para executar um exemplo completo com login e recuperação de sessão após reiniciar o servidor:
+
+```bash
+cargo run --example file_store
+```
+
+A aplicação ficará disponível em `http://127.0.0.1:3001`.
+
+O RustPress cria automaticamente os directórios necessários quando precisar de persistir os dados.
+
+**Considerações importantes:**
+
+- Os dados das sessões e as revogações são persistidos no ficheiro JSON.
+- As sessões com prazo de validade continuam a respeitar a expiração mesmo depois de reiniciar a aplicação.
+- O `FileStore` utiliza operações de ficheiro síncronas, que podem bloquear uma thread de execução assíncrona.
+- Não utilize o mesmo ficheiro como armazenamento partilhado por várias instâncias ou processos simultâneos, pois não existe sincronização entre eles.
+
+Utilize `MemoryStore` para aplicações que não precisam de persistência e `FileStore` quando pretende conservar as sessões entre reinícios.
+
 ### Criar e guardar dados na sessão
 
 Quando as sessões estão activadas, cada pedido recebe uma sessão. Insira ou actualize os dados através de `Session::insert()`:

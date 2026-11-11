@@ -26,7 +26,7 @@ use crate::{
     logger::Logger,
     request::Request,
     response::Response,
-    session::{Cookie, MemoryStore, SessionConfig, SessionManager},
+    session::{Cookie, MemoryStore, SessionConfig, SessionManager, SessionStore},
     upload::{UploadConfig, UploadError, process},
 };
 
@@ -99,10 +99,16 @@ impl Router {
         Self::default()
     }
 
-    /// Activa a gestão de sessões no router.
     pub(crate) fn enable_sessions(&mut self, config: SessionConfig) {
-        let manager =
-            SessionManager::with_ttl(MemoryStore::new(), Duration::from_secs(config.max_age));
+        self.enable_sessions_with_store(config, MemoryStore::new());
+    }
+
+    /// Activa a gestão de sessões com um armazenamento personalizado.
+    pub(crate) fn enable_sessions_with_store<S>(&mut self, config: SessionConfig, store: S)
+    where
+        S: SessionStore + 'static,
+    {
+        let manager = SessionManager::with_ttl(store, Duration::from_secs(config.max_age));
 
         self.session = Some(SessionState {
             manager: Arc::new(manager),

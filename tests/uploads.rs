@@ -3,7 +3,7 @@ use std::{
     io::{Read, Write},
     net::TcpStream,
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 use tokio::net::TcpListener;
 
@@ -54,15 +54,7 @@ fn request_with_multipart(app: App, boundary: &str, body: &[u8]) -> String {
 }
 
 fn temporary_directory() -> std::path::PathBuf {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-
-    std::env::temp_dir().join(format!(
-        "rustpress-upload-test-{}-{timestamp}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("rustpress-upload-test-{}", uuid::Uuid::new_v4()))
 }
 
 #[test]
