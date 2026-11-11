@@ -123,7 +123,7 @@ Para consultar a versão instalada:
 rustpress --version
 ```
 
-O projecto gerado utiliza a dependência `rustpress-web = "0.2.0"` e o runtime Tokio.
+O projecto gerado utiliza a dependência `rustpress-web = "0.2.1"` e o runtime Tokio.
 
 Código-fonte do RustPress CLI: https://github.com/fabriciomichael/rustpress-cli
 
@@ -368,6 +368,7 @@ O método `recv()` devolve `Result<Option<Message>, WebSocketError>`. Quando rec
 - Rotas com parâmetros dinâmicos, como `/ws/:id`.
 - Execução dos middlewares globais antes da aceitação da ligação.
 - Encerramento controlado e detecção de desconexões.
+- Integração com sessões: permite utilizar os dados da sessão durante uma ligação WebSocket e guardar as alterações efectuadas pelo handler quando este termina.
 
 **Nota:** os middlewares globais podem rejeitar o handshake antes de a ligação WebSocket ser estabelecida.
 
@@ -589,7 +590,9 @@ O RustPress cria automaticamente os directórios necessários quando precisar de
 - Os dados das sessões e as revogações são persistidos no ficheiro JSON.
 - As sessões com prazo de validade continuam a respeitar a expiração mesmo depois de reiniciar a aplicação.
 - O `FileStore` utiliza operações de ficheiro síncronas, que podem bloquear uma thread de execução assíncrona.
-- Não utilize o mesmo ficheiro como armazenamento partilhado por várias instâncias ou processos simultâneos, pois não existe sincronização entre eles.
+- As operações de leitura, escrita e revogação adquirem um bloqueio exclusivo e recarregam o estado persistido antes de o modificar, evitando a perda de actualizações concorrentes.
+- Todas as instâncias que partilham o armazenamento devem utilizar o mesmo caminho de ficheiro e manter o ficheiro auxiliar `.lock` intacto durante a utilização.
+- O `FileStore` utiliza operações de ficheiro síncronas, que podem bloquear uma thread de execução assíncrona.
 
 Utilize `MemoryStore` para aplicações que não precisam de persistência e `FileStore` quando pretende conservar as sessões entre reinícios.
 
@@ -1362,6 +1365,8 @@ O middleware serve pedidos GET e HEAD, determina o tipo MIME por extensão e rej
 | `error_handler` | Handler global de erros | `cargo run --example error_handler` |
 | `logger` | Níveis do logger | `cargo run --example logger` |
 | `middleware_logging` | Middleware avançado e respostas JSON | `cargo run --example middleware_logging` |
+| `file_store` | Sessões persistentes em ficheiro JSON | `cargo run --example file_store` |
+| `websocket` | Comunicação bidireccional em tempo real | `cargo run --example websocket` |
 
 ## Ciclo de uma requisição
 
