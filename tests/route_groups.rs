@@ -208,12 +208,15 @@ fn route_group_supports_all_http_methods() {
             |_request, response| Ok(response.send("POST OK")),
         )?;
 
-        api.put("/recurso", |_request, response| response.send("PUT OK"))?;
+        api.put("/recurso", |_request, response| Ok(response.send("PUT OK")))?;
 
-        api.patch("/recurso", |_request, response| response.send("PATCH OK"))?;
+        api.patch("/recurso", |_request, response| {
+            Ok(response.send("PATCH OK"))
+        })?;
 
-        api.delete("/recurso", |_request, response| response.send("DELETE OK"))?;
-
+        api.delete("/recurso", |_request, response| {
+            Ok(response.send("DELETE OK"))
+        })?;
         Ok(())
     })
     .expect("Não foi possível registar as rotas HTTP");
@@ -249,15 +252,15 @@ fn route_group_fallible_handlers_propagate_errors() {
     });
 
     app.group("/api", |api| {
-        api.put_fallible("/recurso", |_request, _response| {
+        api.put("/recurso", |_request, _response| {
             Err(HandlerError::with_status(422, "Erro no PUT"))
         })?;
 
-        api.patch_fallible("/recurso", |_request, _response| {
+        api.patch("/recurso", |_request, _response| {
             Err(HandlerError::with_status(422, "Erro no PATCH"))
         })?;
 
-        api.delete_fallible("/recurso", |_request, _response| {
+        api.delete("/recurso", |_request, _response| {
             Err(HandlerError::with_status(422, "Erro no DELETE"))
         })?;
 

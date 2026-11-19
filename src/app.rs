@@ -155,54 +155,24 @@ impl RouteGroup {
         self.add_fallible(Method::POST, path, handler)
     }
 
-    /// Regista uma rota PUT.
+    /// Regista uma rota PUT cujo handler pode devolver um erro.
     pub fn put<F>(&mut self, path: &str, handler: F) -> Result<(), String>
-    where
-        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
-    {
-        self.add_fallible(Method::PUT, path, move |request, response| {
-            Ok(handler(request, response))
-        })
-    }
-
-    /// Regista uma rota PATCH.
-    pub fn patch<F>(&mut self, path: &str, handler: F) -> Result<(), String>
-    where
-        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
-    {
-        self.add_fallible(Method::PATCH, path, move |request, response| {
-            Ok(handler(request, response))
-        })
-    }
-
-    /// Regista uma rota DELETE.
-    pub fn delete<F>(&mut self, path: &str, handler: F) -> Result<(), String>
-    where
-        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
-    {
-        self.add_fallible(Method::DELETE, path, move |request, response| {
-            Ok(handler(request, response))
-        })
-    }
-
-    /// Regista uma rota PUT com handler que pode devolver um erro.
-    pub fn put_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
     {
         self.add_fallible(Method::PUT, path, handler)
     }
 
-    /// Regista uma rota PATCH com handler que pode devolver um erro.
-    pub fn patch_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    /// Regista uma rota PATCH cujo handler pode devolver um erro.
+    pub fn patch<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
     {
         self.add_fallible(Method::PATCH, path, handler)
     }
 
-    /// Regista uma rota DELETE com handler que pode devolver um erro.
-    pub fn delete_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    /// Regista uma rota DELETE cujo handler pode devolver um erro.
+    pub fn delete<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
     {
@@ -363,32 +333,8 @@ impl App {
         server::serve(listener, self.router, self.logger).await
     }
 
-    /// Regista um handler para pedidos HTTP do tipo PUT.
-    pub fn put<F>(&mut self, path: &str, handler: F) -> Result<(), String>
-    where
-        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
-    {
-        self.router.add(Method::PUT, path, handler)
-    }
-
-    /// Regista um handler para pedidos HTTP do tipo PATCH.
-    pub fn patch<F>(&mut self, path: &str, handler: F) -> Result<(), String>
-    where
-        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
-    {
-        self.router.add(Method::PATCH, path, handler)
-    }
-
-    /// Regista um handler para pedidos HTTP do tipo DELETE.
-    pub fn delete<F>(&mut self, path: &str, handler: F) -> Result<(), String>
-    where
-        F: Fn(Request, Response) -> Response + Send + Sync + 'static,
-    {
-        self.router.add(Method::DELETE, path, handler)
-    }
-
     /// Regista um handler PUT que pode devolver um erro.
-    pub fn put_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    pub fn put<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
     {
@@ -396,7 +342,7 @@ impl App {
     }
 
     /// Regista um handler PATCH que pode devolver um erro.
-    pub fn patch_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    pub fn patch<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
     {
@@ -404,7 +350,7 @@ impl App {
     }
 
     /// Regista um handler DELETE que pode devolver um erro.
-    pub fn delete_fallible<F>(&mut self, path: &str, handler: F) -> Result<(), String>
+    pub fn delete<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
     {

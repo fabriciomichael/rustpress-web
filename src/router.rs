@@ -124,6 +124,7 @@ impl Router {
     ///
     /// O path pode conter segmentos dinâmicos com o prefixo `:`, por exemplo
     /// `/utilizadores/:id`.
+    #[cfg(test)]
     pub(crate) fn add<F>(&mut self, method: Method, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Response + Send + Sync + 'static,

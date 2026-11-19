@@ -34,9 +34,7 @@ A estrutura `App` representa a aplicação web e constitui o principal ponto de 
 Entre os seus métodos encontram-se:
 
 - `App::new()` — cria uma nova aplicação.
-- `get()` e `post()` — registam rotas HTTP.
-- `put()`, `patch()` e `delete()` — registam rotas para os respectivos métodos HTTP.
-- `put_fallible()`, `patch_fallible()` e `delete_fallible()` — registam handlers que podem devolver erros.
+- `get()`, `post()`, `put()`, `patch()` e `delete()` — registam rotas HTTP com handlers que devolvem `Result<Response, HandlerError>`, permitindo respostas normais ou a propagação de erros.
 - `use_middleware()` — regista middleware.
 - `use_middleware_advanced()` — regista middleware com controlo avançado de execução.
 - `use_sessions()` — activa a gestão de sessões.

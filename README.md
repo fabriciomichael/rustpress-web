@@ -215,9 +215,9 @@ As rotas são registadas através da instância de `App`. Os métodos disponíve
 |---|---|---|
 | GET | `app.get(path, handler)` | Sim |
 | POST | `app.post(path, handler)` | Sim |
-| PUT | `app.put(path, handler)` | `app.put_fallible(path, handler)` |
-| PATCH | `app.patch(path, handler)` | `app.patch_fallible(path, handler)` |
-| DELETE | `app.delete(path, handler)` | `app.delete_fallible(path, handler)` |
+| PUT | `app.put(path, handler)` | Sim |
+| PATCH | `app.patch(path, handler)` | Sim |
+| DELETE | `app.delete(path, handler)` | Sim |
 
 O registo de uma rota devolve `Result<(), String>`; use `?` ou trate o erro para detectar padrões de rota inválidos.
 
@@ -902,36 +902,38 @@ app.group("/api/produtos", |products| {
     })?;
 
     products.put("/:id", |_req, _res| {
-        Response::json(r#"{"metodo":"PUT"}"#)
+        Ok(Response::json(r#"{"metodo":"PUT"}"#))
     })?;
 
     products.patch("/:id", |_req, _res| {
-        Response::json(r#"{"metodo":"PATCH"}"#)
+        Ok(Response::json(r#"{"metodo":"PATCH"}"#))
     })?;
 
     products.delete("/:id", |_req, _res| {
-        Response::json(r#"{"metodo":"DELETE"}"#)
+        Ok(Response::json(r#"{"metodo":"DELETE"}"#))
     })?;
 
     Ok(())
 })?;
 ```
 
-Os handlers GET e POST recebem uma closure que devolve `Result<Response, HandlerError>`. Os métodos PUT, PATCH e DELETE também disponibilizam variantes `put_fallible()`, `patch_fallible()` e `delete_fallible()` para handlers que precisam de devolver erros:
+Todos os métodos de registo de rotas (GET, POST, PUT, PATCH e DELETE) aceitam handlers que devolvem `Result<Response, HandlerError>`. Assim, qualquer handler pode devolver uma resposta normal com `Ok()` ou propagar um erro com `Err()`.
+
+Por exemplo:
 
 ```rust
 use rustpress_web::HandlerError;
 
 app.group("/api", |api| {
-    api.put_fallible("/recurso/:id", |_req, _res| {
+    api.put("/recurso/:id", |_req, _res| {
         Err(HandlerError::with_status(422, "Dados inválidos"))
     })?;
 
-    api.patch_fallible("/recurso/:id", |_req, _res| {
+    api.patch("/recurso/:id", |_req, _res| {
         Err(HandlerError::with_status(422, "Não foi possível actualizar"))
     })?;
 
-    api.delete_fallible("/recurso/:id", |_req, _res| {
+    api.delete("/recurso/:id", |_req, _res| {
         Err(HandlerError::with_status(404, "Recurso não encontrado"))
     })?;
 

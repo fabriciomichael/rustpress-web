@@ -162,19 +162,19 @@ fn request_fallible_route_with_method(method: &str) -> String {
 
     match method {
         "PUT" => app
-            .put_fallible("/teste", |_req, _res| {
+            .put("/teste", |_req, _res| {
                 Err(std::io::Error::other("Erro de teste").into())
             })
             .expect("Erro ao registar PUT"),
 
         "PATCH" => app
-            .patch_fallible("/teste", |_req, _res| {
+            .patch("/teste", |_req, _res| {
                 Err(std::io::Error::other("Erro de teste").into())
             })
             .expect("Erro ao registar PATCH"),
 
         "DELETE" => app
-            .delete_fallible("/teste", |_req, _res| {
+            .delete("/teste", |_req, _res| {
                 Err(std::io::Error::other("Erro de teste").into())
             })
             .expect("Erro ao registar DELETE"),
@@ -410,7 +410,7 @@ fn returns_404_for_unknown_dynamic_route() {
 }
 
 #[test]
-fn put_fallible_returns_500_without_leaking_error_details() {
+fn put_returns_500_without_leaking_error_details() {
     let response = request_fallible_route_with_method("PUT");
 
     assert!(response.contains("500 Internal Server Error"), "{response}");
@@ -422,13 +422,13 @@ fn put_fallible_returns_500_without_leaking_error_details() {
 }
 
 #[test]
-fn patch_fallible_returns_500_when_handler_fails() {
+fn patch_returns_500_when_handler_fails() {
     let response = request_fallible_route_with_method("PATCH");
     assert!(response.contains("500 Internal Server Error"), "{response}");
 }
 
 #[test]
-fn delete_fallible_returns_500_when_handler_fails() {
+fn delete_returns_500_when_handler_fails() {
     let response = request_fallible_route_with_method("DELETE");
     assert!(response.contains("500 Internal Server Error"), "{response}");
 }
