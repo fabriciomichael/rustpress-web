@@ -121,7 +121,7 @@ To check the installed version:
 rustpress --version
 ```
 
-The generated project uses the `rustpress-web = "0.2.1"` dependency and the Tokio runtime.
+The generated project uses the `rustpress-web = "0.3.1"` dependency and the Tokio runtime.
 
 RustPress CLI source code: https://github.com/fabriciomichael/rustpress-cli
 
