@@ -1,39 +1,39 @@
-/// Configuração do atributo SameSite de um cookie.
+/// Cookie SameSite attribute configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SameSite {
-    /// O cookie só é enviado em pedidos do mesmo site.
+    /// The cookie is sent only for same-site requests.
     Strict,
 
-    /// Permite o envio em determinadas navegações entre sites.
+    /// Allows the cookie to be sent during certain cross-site navigations.
     Lax,
 
-    /// Permite o envio em pedidos entre sites.
-    /// Exige que o atributo Secure esteja activo.
+    /// Allows the cookie to be sent for cross-site requests.
+    /// Requires the Secure attribute to be active.
     None,
 }
 
-/// Configuração das sessões e do respectivo cookie.
+/// Session and session cookie configuration.
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
-    /// Nome do cookie que identifica a sessão.
+    /// Name of the cookie that identifies the session.
     pub cookie_name: String,
 
-    /// Caminho no qual o cookie é válido.
+    /// Path on which the cookie is valid.
     pub path: String,
 
-    /// Domínio no qual o cookie é válido.
+    /// Domain on which the cookie is valid.
     pub domain: Option<String>,
 
-    /// Tempo de vida da sessão, em segundos.
+    /// Session lifetime, in seconds.
     pub max_age: u64,
 
-    /// Impede o acesso ao cookie através de JavaScript.
+    /// Prevents access to the cookie through JavaScript.
     pub http_only: bool,
 
-    /// Exige uma ligação HTTPS para enviar o cookie.
+    /// Requires an HTTPS connection to send the cookie.
     pub secure: bool,
 
-    /// Política de envio do cookie entre sites.
+    /// Cross-site cookie sending policy.
     pub same_site: SameSite,
 }
 
@@ -52,17 +52,17 @@ impl Default for SessionConfig {
 }
 
 impl SessionConfig {
-    /// Valida as configurações da sessão e do respectivo cookie.
+    /// Validates the session and session cookie configuration.
     pub fn validate(&self) -> Result<(), super::cookie::CookieError> {
         use super::cookie::{CookieError, is_valid_cookie_name};
 
-        // Validar o nome do cookie.
+        // Validate the cookie name.
         if !is_valid_cookie_name(&self.cookie_name) {
             return Err(CookieError::InvalidName);
         }
 
-        // O caminho deve começar por "/" e não pode conter
-        // caracteres de controlo nem ponto e vírgula.
+        // The path must start with "/" and must not contain
+        // control characters or semicolons.
         if !self.path.starts_with('/')
             || !self.path.bytes().all(|byte| {
                 (0x20..=0x7E).contains(&byte) && !matches!(byte, b';' | b',' | b'"' | b'\\')
@@ -71,7 +71,7 @@ impl SessionConfig {
             return Err(CookieError::InvalidAttribute);
         }
 
-        // Validar o domínio, quando definido.
+        // Validate the domain, when defined.
         if let Some(domain) = &self.domain {
             let valid_domain = !domain.is_empty()
                 && domain.len() <= 253
@@ -95,7 +95,7 @@ impl SessionConfig {
             }
         }
 
-        // SameSite=None exige Secure.
+        // SameSite=None requires Secure.
         if self.same_site == SameSite::None && !self.secure {
             return Err(CookieError::InvalidAttribute);
         }

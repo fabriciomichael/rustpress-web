@@ -429,7 +429,7 @@ where
         }
     }
 
-    // Primeira requisição: obter a sessão e o token CSRF.
+    // First request: retrieve the session and CSRF token.
     let first_response = send_request(&address, "GET", first_path, None, None, None);
 
     let cookie = first_response
@@ -444,7 +444,7 @@ where
 
     let (body, header) = make_request(token);
 
-    // Segunda requisição: enviar o formulário com a mesma sessão.
+    // Second request: submit the form using the same session.
     let second_response = send_request(
         &address,
         "POST",
@@ -1279,7 +1279,7 @@ fn auth_middleware_protects_route() {
         app
     }
 
-    // Primeiro cenário: pedido sem credenciais.
+    // First scenario: request without credentials.
     let mut app = create_app();
 
     let response = request_with_app(app, "GET", "/dashboard");
@@ -1294,7 +1294,7 @@ fn auth_middleware_protects_route() {
         "O utilizador não autenticado acedeu indevidamente à rota"
     );
 
-    // Segundo cenário: pedido com credenciais válidas.
+    // Second scenario: request with valid credentials.
     app = create_app();
 
     let response = request_with_headers(
@@ -1417,7 +1417,7 @@ fn role_middleware_rejects_unauthenticated_user() {
 
         let mut session = session.lock().unwrap();
 
-        // Cria uma sessão modificada, mas sem user_id.
+        // Creates a modified session without a user_id.
         session.insert("role", "guest").unwrap();
 
         Ok(response.send("Sem autenticação"))

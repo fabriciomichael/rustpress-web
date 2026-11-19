@@ -4,7 +4,7 @@ use rustpress_web::{App, MiddlewareResult, Request, Response};
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut app = App::new();
 
-    // Regista informações sobre cada pedido HTTP.
+    // Logs information about each HTTP request.
     app.use_middleware_advanced(|request: &Request| {
         println!("[RustPress] {} {}", request.method(), request.path());
 

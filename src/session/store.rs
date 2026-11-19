@@ -1,4 +1,4 @@
-//! Armazenamento interno dos dados das sessões.
+//! Internal storage for session data.
 
 use std::{
     collections::HashMap,
@@ -13,22 +13,22 @@ use serde_json::Value;
 const REVOCATION_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Erros que podem ocorrer durante operações de armazenamento de sessões.
+/// Errors that can occur during session storage operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionStoreError {
-    /// O lock interno do armazenamento foi envenenado.
+    /// The storage's internal lock was poisoned.
     LockPoisoned,
 
-    /// O tempo de vida não pode ser representado pelo relógio interno.
+    /// The time to live cannot be represented by the internal clock.
     TtlOverflow,
 
-    /// A tentativa de escrita utilizou um ID de sessão revogado.
+    /// The write attempt used a revoked session ID.
     RevokedSession,
 
-    /// Ocorreu um erro durante uma operação de ficheiro.
+    /// An error occurred during a file operation.
     Io(String),
 
-    /// Ocorreu um erro ao serializar ou desserializar os dados.
+    /// An error occurred while serializing or deserializing data.
     Serialization(String),
 }
 
@@ -52,15 +52,15 @@ impl std::fmt::Display for SessionStoreError {
 
 impl std::error::Error for SessionStoreError {}
 
-/// Interface para armazenamento dos dados das sessões.
+/// Interface for storing session data.
 pub trait SessionStore: Send + Sync {
-    /// Obtém os dados de uma sessão pelo seu identificador.
+    /// Gets session data by its identifier.
     fn get(&self, session_id: &str) -> Result<Option<Value>, SessionStoreError>;
 
-    /// Guarda ou actualiza os dados de uma sessão.
+    /// Saves or updates session data.
     fn set(&self, session_id: String, data: Value) -> Result<(), SessionStoreError>;
 
-    /// Guarda uma sessão com um tempo de vida limitado.
+    /// Saves a session with a limited time to live.
     fn set_with_ttl(
         &self,
         session_id: String,
@@ -68,40 +68,40 @@ pub trait SessionStore: Send + Sync {
         ttl: Duration,
     ) -> Result<(), SessionStoreError>;
 
-    /// Remove uma sessão do armazenamento.
+    /// Removes a session from storage.
     fn remove(&self, session_id: &str) -> Result<(), SessionStoreError>;
 
-    /// Revoga uma sessão, impedindo gravações posteriores com o mesmo ID.
+    /// Revokes a session, preventing further writes with the same ID.
     fn revoke(&self, session_id: &str) -> Result<(), SessionStoreError>;
 
-    /// Revoga uma sessão e define opcionalmente a duração da revogação.
+    /// Revokes a session and optionally defines the revocation duration.
     fn revoke_with_ttl(
         &self,
         session_id: &str,
         ttl: Option<Duration>,
     ) -> Result<(), SessionStoreError>;
 }
-/// Entrada armazenada, incluindo o momento de expiração.
+/// Stored entry, including its expiration time.
 struct SessionEntry {
     data: Value,
     expires_at: Option<Instant>,
 }
 
-/// Entrada de sessão preparada para persistência em ficheiro.
+/// Session entry prepared for file persistence.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct FileSessionEntry {
     data: Value,
     expires_at: Option<u64>,
 }
 
-/// Estado completo persistido pelo FileStore.
+/// Complete state persisted by FileStore.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 struct FileStoreData {
     sessions: HashMap<String, FileSessionEntry>,
     revoked: HashMap<String, Option<u64>>,
 }
 
-/// Armazenamento persistente de sessões em ficheiro JSON.
+/// Persistent session storage in a JSON file.
 pub struct FileStore {
     path: PathBuf,
     lock_path: PathBuf,
@@ -109,10 +109,10 @@ pub struct FileStore {
 }
 
 impl FileStore {
-    /// Abre um armazenamento persistente de sessões.
+    /// Opens persistent session storage.
     ///
-    /// Se o ficheiro principal não existir, tenta recuperar uma cópia
-    /// de segurança deixada por uma interrupção anterior.
+    /// If the main file does not exist, tries to recover a backup
+    /// left by a previous interruption.
     pub fn new(path: impl AsRef<Path>) -> Result<Self, SessionStoreError> {
         let cutoff = SystemTime::now()
             .checked_sub(Duration::from_secs(24 * 60 * 60))
@@ -140,7 +140,7 @@ impl FileStore {
         })
     }
 
-    /// Adquire um bloqueio exclusivo sobre o ficheiro auxiliar.
+    /// Acquires an exclusive lock on the auxiliary file.
     fn acquire_file_lock(lock_path: &Path) -> Result<fs::File, SessionStoreError> {
         use fs2::FileExt;
 
@@ -166,7 +166,7 @@ impl FileStore {
         Ok(lock_file)
     }
 
-    /// Carrega o estado persistido, recuperando um backup quando necessário.
+    /// Loads the persisted state and recovers a backup when necessary.
     fn load_state(path: &Path) -> Result<FileStoreData, SessionStoreError> {
         let state = match fs::read(path) {
             Ok(contents) => match serde_json::from_slice(&contents) {
@@ -175,7 +175,7 @@ impl FileStore {
                 Err(error) => {
                     let original_error = SessionStoreError::Serialization(error.to_string());
 
-                    // Preservar o ficheiro principal corrompido.
+                    // Preserve the corrupted main file.
                     let corrupt_path =
                         path.with_extension(format!("corrupt-{}", uuid::Uuid::new_v4()));
 
@@ -222,7 +222,7 @@ impl FileStore {
         Ok(state)
     }
 
-    /// Procura e recupera uma cópia de segurança.
+    /// Searches for and recovers a backup.
     fn recover_backup(path: &Path) -> Result<Option<FileStoreData>, SessionStoreError> {
         let parent = path
             .parent()
@@ -260,7 +260,7 @@ impl FileStore {
             }
         }
 
-        // Prioriza as cópias de segurança mais recentes.
+        // Prioritize the most recent backups.
         backups.sort_by_key(|backup| {
             fs::metadata(backup)
                 .and_then(|metadata| metadata.modified())
@@ -288,7 +288,7 @@ impl FileStore {
                 }
             };
 
-            // Só restaura uma cópia depois de confirmar que é válida.
+            // Restore a copy only after confirming that it is valid.
             if let Err(error) = fs::rename(&backup_path, path) {
                 last_error = Some(SessionStoreError::Io(error.to_string()));
                 continue;
@@ -303,7 +303,7 @@ impl FileStore {
         }
     }
 
-    /// Obtém o timestamp Unix actual em milissegundos.
+    /// Gets the current Unix timestamp in milliseconds.
     fn unix_timestamp() -> Result<u64, SessionStoreError> {
         let duration = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -312,7 +312,7 @@ impl FileStore {
         u64::try_from(duration.as_millis()).map_err(|_| SessionStoreError::TtlOverflow)
     }
 
-    /// Calcula o timestamp Unix de expiração em milissegundos.
+    /// Calculates the expiration Unix timestamp in milliseconds.
     fn expiration_timestamp(ttl: Duration) -> Result<u64, SessionStoreError> {
         let expiration = SystemTime::now()
             .checked_add(ttl)
@@ -325,7 +325,7 @@ impl FileStore {
         u64::try_from(duration.as_millis()).map_err(|_| SessionStoreError::TtlOverflow)
     }
 
-    /// Persiste o estado actual através de um ficheiro temporário e cópia de segurança.
+    /// Persists the current state through a temporary file and backup.
     fn persist(&self, data: &FileStoreData) -> Result<(), SessionStoreError> {
         let contents = serde_json::to_vec_pretty(data)
             .map_err(|error| SessionStoreError::Serialization(error.to_string()))?;
@@ -399,7 +399,7 @@ impl FileStore {
         Ok(())
     }
 
-    /// Remove sessões e revogações expiradas.
+    /// Removes expired sessions and revocations.
     fn cleanup_expired(data: &mut FileStoreData, now: u64) -> usize {
         let expired_ids: Vec<String> = data
             .sessions
@@ -423,17 +423,17 @@ impl FileStore {
         removed_sessions + revoked_before - data.revoked.len()
     }
 
-    /// Obtém os dados de uma sessão.
+    /// Gets the data for a session.
     pub fn get_session(&self, session_id: &str) -> Result<Option<Value>, SessionStoreError> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        // Bloqueia o acesso ao ficheiro entre diferentes instâncias.
+        // Blocks file access between different instances.
         let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
 
-        // Obtém sempre a versão mais recente do disco.
+        // Always gets the latest version from disk.
         let mut next_state = Self::load_state(&self.path)?;
 
         let now = Self::unix_timestamp()?;
@@ -448,13 +448,13 @@ impl FileStore {
             self.persist(&next_state)?;
         }
 
-        // Actualiza a cópia local, mesmo quando não houve limpeza.
+        // Updates the local copy even when no cleanup occurred.
         *state = next_state;
 
         Ok(data)
     }
 
-    /// Guarda ou actualiza uma sessão sem tempo de expiração.
+    /// Saves or updates a session without an expiration time.
     pub fn set_session(&self, session_id: String, data: Value) -> Result<(), SessionStoreError> {
         let mut state = self
             .state
@@ -492,7 +492,7 @@ impl FileStore {
         Ok(())
     }
 
-    /// Guarda uma sessão com um tempo de vida limitado.
+    /// Saves a session with a limited time to live.
     pub fn set_session_with_ttl(
         &self,
         session_id: String,
@@ -506,10 +506,10 @@ impl FileStore {
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        // Bloqueia o acesso ao ficheiro entre diferentes instâncias.
+        // Blocks file access between different instances.
         let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
 
-        // Obtém sempre a versão mais recente do disco.
+        // Always gets the latest version from disk.
         let mut next_state = Self::load_state(&self.path)?;
 
         let now = Self::unix_timestamp()?;
@@ -539,17 +539,17 @@ impl FileStore {
         Ok(())
     }
 
-    /// Remove uma sessão sem revogar o seu identificador.
+    /// Removes a session without revoking its identifier.
     pub fn remove_session(&self, session_id: &str) -> Result<(), SessionStoreError> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        // Bloqueia o acesso ao ficheiro entre diferentes instâncias.
+        // Blocks file access between different instances.
         let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
 
-        // Obtém sempre a versão mais recente do disco.
+        // Always gets the latest version from disk.
         let mut next_state = Self::load_state(&self.path)?;
 
         let now = Self::unix_timestamp()?;
@@ -563,19 +563,19 @@ impl FileStore {
         Ok(())
     }
 
-    /// Revoga permanentemente uma sessão.
+    /// Permanently revokes a session.
     ///
-    /// O identificador revogado não poderá ser reutilizado.
+    /// The revoked identifier cannot be reused.
     pub fn revoke_session(&self, session_id: &str) -> Result<(), SessionStoreError> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        // Bloqueia o acesso ao ficheiro entre diferentes instâncias.
+        // Blocks file access between different instances.
         let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
 
-        // Obtém sempre a versão mais recente do disco.
+        // Always gets the latest version from disk.
         let mut next_state = Self::load_state(&self.path)?;
 
         let now = Self::unix_timestamp()?;
@@ -590,10 +590,10 @@ impl FileStore {
         Ok(())
     }
 
-    /// Revoga uma sessão durante um período determinado.
+    /// Revokes a session for a specified period.
     ///
-    /// O TTL mínimo de revogação é de 24 horas.
-    /// Se já existir uma revogação permanente, ela será preservada.
+    /// The minimum revocation TTL is 24 hours.
+    /// If a permanent revocation already exists, it is preserved.
     pub fn revoke_session_with_ttl(
         &self,
         session_id: &str,
@@ -604,10 +604,10 @@ impl FileStore {
             .lock()
             .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-        // Bloqueia o acesso ao ficheiro entre diferentes instâncias.
+        // Blocks file access between different instances.
         let _file_lock = Self::acquire_file_lock(&self.lock_path)?;
 
-        // Obtém sempre a versão mais recente do disco.
+        // Always gets the latest version from disk.
         let mut next_state = Self::load_state(&self.path)?;
 
         let now = Self::unix_timestamp()?;
@@ -647,7 +647,7 @@ impl FileStore {
         Ok(())
     }
 
-    /// Remove ficheiros temporários abandonados há mais de 24 horas.
+    /// Removes temporary files abandoned for more than 24 hours.
     fn cleanup_temporary_files(path: &Path, cutoff: SystemTime) -> Result<(), SessionStoreError> {
         let parent = path
             .parent()
@@ -704,7 +704,7 @@ impl FileStore {
     }
 }
 
-/// Armazenamento de sessões em memória.
+/// In-memory session storage.
 #[derive(Clone, Default)]
 pub struct MemoryStore {
     sessions: Arc<RwLock<HashMap<String, SessionEntry>>>,
@@ -713,7 +713,7 @@ pub struct MemoryStore {
 }
 
 impl MemoryStore {
-    /// Cria um armazenamento de sessões vazio.
+    /// Creates an empty session storage.
     pub fn new() -> Self {
         Self::default()
     }
@@ -731,9 +731,9 @@ impl MemoryStore {
             .ok_or(SessionStoreError::TtlOverflow)
     }
 
-    /// Remove sessões e registos de revogação expirados.
+    /// Removes expired sessions and revocation records.
     ///
-    /// Retorna a quantidade total de entradas removidas.
+    /// Returns the total number of removed entries.
     pub fn cleanup(&self) -> Result<usize, SessionStoreError> {
         let mut sessions = self
             .sessions
@@ -747,10 +747,10 @@ impl MemoryStore {
 
         let now = Instant::now();
 
-        // Revoga e remove as sessões expiradas.
+        // Revoke and remove expired sessions.
         let removed_sessions = Self::revoke_expired_sessions(&mut sessions, &mut revoked, now)?;
 
-        // Remove os registos de revogação expirados.
+        // Remove expired revocation records.
         let revoked_before = revoked.len();
 
         revoked.retain(|_, expiry| expiry.is_none_or(|expiry| now < expiry));
@@ -759,7 +759,7 @@ impl MemoryStore {
 
         Ok(removed_sessions + removed_revocations)
     }
-    /// Executa a limpeza quando o intervalo configurado tiver decorrido.
+    /// Runs cleanup when the configured interval has elapsed.
     fn cleanup_if_needed(&self) -> Result<(), SessionStoreError> {
         let mut last_cleanup = self
             .last_cleanup
@@ -785,7 +785,7 @@ impl MemoryStore {
         revoked: &mut HashMap<String, Option<Instant>>,
         now: Instant,
     ) -> Result<usize, SessionStoreError> {
-        // Identifica as sessões expiradas.
+        // Identify expired sessions.
         let expired_ids: Vec<String> = sessions
             .iter()
             .filter(|(_, entry)| entry.expires_at.is_some_and(|expiry| now >= expiry))
@@ -796,7 +796,7 @@ impl MemoryStore {
             return Ok(0);
         }
 
-        // Regista permanentemente os IDs expirados como revogados.
+        // Permanently record expired IDs as revoked.
         for session_id in &expired_ids {
             revoked
                 .entry(session_id.clone())
@@ -804,7 +804,7 @@ impl MemoryStore {
                 .or_insert(None);
         }
 
-        // Remove as sessões expiradas.
+        // Remove expired sessions.
         sessions.retain(|_, entry| entry.expires_at.is_none_or(|expiry| now < expiry));
 
         Ok(expired_ids.len())
@@ -859,16 +859,16 @@ impl SessionStore for MemoryStore {
             .is_some_and(|expires_at| Instant::now() >= expires_at);
 
         if expired {
-            // Calcula o prazo antes de modificar o armazenamento.
+            // Calculate the deadline before modifying the storage.
 
-            // Mantém a ordem global de aquisição dos locks.
+            // Preserve the global lock acquisition order.
             let mut revoked = self
                 .revoked
                 .write()
                 .map_err(|_| SessionStoreError::LockPoisoned)?;
 
-            // Só modifica os mapas depois de todas as operações
-            // que podem devolver erros terem sido concluídas.
+            // Modify the maps only after all operations
+            // that may return errors have completed.
             sessions.remove(session_id);
 
             revoked
@@ -897,18 +897,18 @@ impl SessionStore for MemoryStore {
 
         let now = Instant::now();
 
-        // Remove revogações que já expiraram.
+        // Remove revocations that have already expired.
         revoked.retain(|_, expiry| expiry.is_none_or(|expiry| now < expiry));
 
-        // Revoga e remove as sessões expiradas.
+        // Revoke and remove expired sessions.
         Self::revoke_expired_sessions(&mut sessions, &mut revoked, now)?;
 
-        // Impede a reutilização de IDs revogados.
+        // Prevent reuse of revoked IDs.
         if revoked.contains_key(&session_id) {
             return Err(SessionStoreError::RevokedSession);
         }
 
-        // Guarda a nova sessão.
+        // Save the new session.
         sessions.insert(
             session_id,
             SessionEntry {
@@ -942,18 +942,18 @@ impl SessionStore for MemoryStore {
 
         let expires_at = now.checked_add(ttl).ok_or(SessionStoreError::TtlOverflow)?;
 
-        // Remove as revogações que já expiraram.
+        // Remove revocations that have already expired.
         revoked.retain(|_, expiry| expiry.is_none_or(|expiry| now < expiry));
 
-        // Revoga e remove as sessões expiradas.
+        // Revoke and remove expired sessions.
         Self::revoke_expired_sessions(&mut sessions, &mut revoked, now)?;
 
-        // Não permite reutilizar um ID revogado.
+        // Do not allow reuse of a revoked ID.
         if revoked.contains_key(&session_id) {
             return Err(SessionStoreError::RevokedSession);
         }
 
-        // Guarda a nova sessão.
+        // Save the new session.
         sessions.insert(
             session_id,
             SessionEntry {
@@ -1144,17 +1144,17 @@ mod tests {
 
         std::thread::sleep(Duration::from_millis(100));
 
-        // O ID antigo não deve recuperar os dados anteriores.
+        // The old ID must not recover the previous data.
         assert!(store.get(&session_id).unwrap().is_none());
 
-        // Mesmo que tentem guardar dados usando o mesmo ID,
-        // a store não deve recuperar a sessão antiga.
-        // Uma tentativa de reutilizar o ID revogado deve falhar.
+        // Even if an attempt is made to save data using the same ID,
+        // the store must not recover the old session.
+        // An attempt to reuse the revoked ID must fail.
         let result = store.set(session_id.clone(), json!({"user_id": 999}));
 
         assert_eq!(result, Err(SessionStoreError::RevokedSession));
 
-        // Os dados antigos continuam inacessíveis.
+        // The old data remains inaccessible.
         assert!(store.get(&session_id).unwrap().is_none());
     }
 
@@ -1357,13 +1357,13 @@ mod tests {
 
         store.cleanup().unwrap();
 
-        // Confirma a revogação permanente.
+        // Confirm the permanent revocation.
         assert_eq!(
             store.revoked.read().unwrap().get("expired-session"),
             Some(&None)
         );
 
-        // O identificador não pode ser reutilizado.
+        // The identifier cannot be reused.
         let result = store.set(
             "expired-session".to_string(),
             serde_json::json!({"user": 2}),
@@ -1428,7 +1428,7 @@ mod tests {
 
         assert_eq!(result, Err(SessionStoreError::RevokedSession));
 
-        // Confirma que a expiração provocou uma revogação permanente.
+        // Confirm that expiration caused a permanent revocation.
         assert_eq!(
             store.revoked.read().unwrap().get("expired-session"),
             Some(&None)
@@ -1444,7 +1444,7 @@ mod tests {
 
         let session_id = "persistent-session";
 
-        // Primeira instância: guardar a sessão.
+        // First instance: save the session.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1459,7 +1459,7 @@ mod tests {
                 .unwrap();
         }
 
-        // Segunda instância: recuperar a sessão do ficheiro.
+        // Second instance: retrieve the session from the file.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1469,7 +1469,7 @@ mod tests {
             assert_eq!(data["role"], "admin");
         }
 
-        // Limpar o ficheiro de teste.
+        // Clean up the test file.
         let _ = std::fs::remove_file(path);
     }
 
@@ -1482,7 +1482,7 @@ mod tests {
 
         let session_id = "recovered-session";
 
-        // Criar e persistir uma sessão.
+        // Create and persist a session.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1491,10 +1491,10 @@ mod tests {
                 .unwrap();
         }
 
-        // Simular uma interrupção após mover o original para backup.
+        // Simulate an interruption after moving the original to the backup.
         std::fs::rename(&path, &backup_path).unwrap();
 
-        // O construtor deverá recuperar automaticamente o backup.
+        // The constructor should automatically recover the backup.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1519,7 +1519,7 @@ mod tests {
         let backup_path = path.with_extension("backup-valid");
         let session_id = "main-corrupt-session";
 
-        // Criar e persistir uma sessão.
+        // Create and persist a session.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1528,13 +1528,13 @@ mod tests {
                 .unwrap();
         }
 
-        // Simular a existência de um backup válido.
+        // Simulate the existence of a valid backup.
         std::fs::rename(&path, &backup_path).unwrap();
 
-        // Criar um ficheiro principal corrompido.
+        // Create a corrupted main file.
         std::fs::write(&path, b"{ invalid json").unwrap();
 
-        // O armazenamento deverá recuperar o backup.
+        // The storage should recover the backup.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1545,7 +1545,7 @@ mod tests {
             assert!(!backup_path.exists());
         }
 
-        // Localizar o ficheiro corrompido preservado.
+        // Locate the preserved corrupted file.
         let corrupt_prefix = format!("{}.corrupt-", path.file_stem().unwrap().to_string_lossy());
 
         let corrupt_path = std::fs::read_dir(path.parent().unwrap())
@@ -1559,10 +1559,10 @@ mod tests {
             })
             .expect("O ficheiro corrompido deveria continuar preservado");
 
-        // Confirmar que o conteúdo original não foi alterado.
+        // Confirm that the original content has not been changed.
         assert_eq!(std::fs::read(&corrupt_path).unwrap(), b"{ invalid json");
 
-        // Limpar os ficheiros do teste.
+        // Clean up the test files.
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_file(backup_path);
         let _ = std::fs::remove_file(corrupt_path);
@@ -1580,7 +1580,7 @@ mod tests {
 
         let session_id = "directory-recovery-session";
 
-        // Criar e persistir uma sessão.
+        // Create and persist a session.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1589,13 +1589,13 @@ mod tests {
                 .unwrap();
         }
 
-        // Simular uma interrupção: mover o ficheiro principal para backup.
+        // Simulate an interruption: move the main file to the backup.
         std::fs::rename(&path, &valid_backup).unwrap();
 
-        // Criar um directório com o prefixo reservado aos backups.
+        // Create a directory with the prefix reserved for backups.
         std::fs::create_dir(&directory_backup).unwrap();
 
-        // O armazenamento deve ignorar o directório e recuperar o ficheiro válido.
+        // The storage should ignore the directory and recover the valid file.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1624,7 +1624,7 @@ mod tests {
 
         let session_id = "valid-recovered-session";
 
-        // Criar uma sessão e guardar uma cópia válida.
+        // Create a session and save a valid copy.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1635,12 +1635,12 @@ mod tests {
 
         std::fs::rename(&path, &valid_backup).unwrap();
 
-        // Garantir que a cópia corrompida é mais recente.
+        // Ensure that the corrupted copy is newer.
         std::thread::sleep(Duration::from_millis(50));
 
         std::fs::write(&corrupted_backup, b"{ invalid json").unwrap();
 
-        // O armazenamento deve ignorar a cópia corrompida.
+        // The storage should ignore the corrupted copy.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1664,7 +1664,7 @@ mod tests {
 
         let session_id = "revoked-session";
 
-        // Primeira instância: guardar e revogar a sessão.
+        // First instance: save and revoke the session.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1675,7 +1675,7 @@ mod tests {
             store.revoke_session(session_id).unwrap();
         }
 
-        // Segunda instância: confirmar que a revogação foi preservada.
+        // Second instance: confirm that the revocation was preserved.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1733,7 +1733,7 @@ mod tests {
 
         let session_id = "reusable-session";
 
-        // Primeira instância: criar e remover a sessão.
+        // First instance: create and remove the session.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1746,7 +1746,7 @@ mod tests {
             assert!(store.get_session(session_id).unwrap().is_none());
         }
 
-        // Segunda instância: reutilizar o mesmo identificador.
+        // Second instance: reuse the same identifier.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1774,19 +1774,19 @@ mod tests {
 
         let session_id = "permanently-revoked-session";
 
-        // Primeira instância: revogar permanentemente.
+        // First instance: revoke permanently.
         {
             let store = FileStore::new(&path).unwrap();
 
             store.revoke_session(session_id).unwrap();
 
-            // Tentar substituir a revogação permanente por temporária.
+            // Try to replace the permanent revocation with a temporary one.
             store
                 .revoke_session_with_ttl(session_id, Some(Duration::from_secs(60)))
                 .unwrap();
         }
 
-        // Segunda instância: confirmar que continua permanentemente revogada.
+        // Second instance: confirm that it remains permanently revoked.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1811,22 +1811,22 @@ mod tests {
 
         let session_id = "shared-revoked-session";
 
-        // A primeira instância cria a sessão.
+        // The first instance creates the session.
         store_a
             .set_session(session_id.to_string(), json!({"user": "A"}))
             .unwrap();
 
-        // A segunda instância revoga permanentemente a sessão.
+        // The second instance permanently revokes the session.
         store_b.revoke_session(session_id).unwrap();
 
-        // A primeira instância não deve conseguir reutilizar o identificador.
+        // The first instance must not be able to reuse the identifier.
         let result = store_a.set_session(session_id.to_string(), json!({"user": "B"}));
 
         assert_eq!(result, Err(SessionStoreError::RevokedSession));
 
         assert!(store_a.get_session(session_id).unwrap().is_none());
 
-        // Uma terceira instância confirma a persistência da revogação.
+        // A third instance confirms that the revocation persists.
         let reopened = FileStore::new(&path).unwrap();
 
         let result = reopened.set_session(session_id.to_string(), json!({"user": "C"}));
@@ -1850,7 +1850,7 @@ mod tests {
 
         let session_id = "temporarily-revoked-session";
 
-        // Primeira instância: criar e revogar temporariamente.
+        // First instance: create and revoke temporarily.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1863,7 +1863,7 @@ mod tests {
                 .unwrap();
         }
 
-        // Segunda instância: confirmar que a revogação foi preservada.
+        // Second instance: confirm that the revocation was preserved.
         {
             let store = FileStore::new(&path).unwrap();
 
@@ -1913,7 +1913,7 @@ mod tests {
 
         std::fs::write(&temp_path, b"temporary data still in use").unwrap();
 
-        // Define um limite de 24 horas atrás.
+        // Set a limit of 24 hours in the past.
         let cutoff = SystemTime::now() - Duration::from_secs(24 * 60 * 60);
 
         let store = FileStore::new_with_cutoff(&path, cutoff).unwrap();
@@ -1935,22 +1935,22 @@ mod tests {
 
         let corrupted_content = b"{ invalid json";
 
-        // Criar um ficheiro principal corrompido.
+        // Create a corrupted main file.
         std::fs::write(&path, corrupted_content).unwrap();
 
-        // Tentar abrir o FileStore.
+        // Try to open the FileStore.
         let result = FileStore::new(&path);
 
-        // Deve devolver um erro de serialização.
+        // It should return a serialization error.
         assert!(matches!(result, Err(SessionStoreError::Serialization(_))));
 
-        // O ficheiro original deve continuar no caminho principal.
+        // The original file should remain at the main path.
         assert!(path.exists());
 
-        // O conteúdo original deve permanecer intacto.
+        // The original content should remain intact.
         assert_eq!(std::fs::read(&path).unwrap(), corrupted_content);
 
-        // Limpar o ficheiro do teste.
+        // Clean up the test file.
         let _ = std::fs::remove_file(path);
     }
 
@@ -1965,27 +1965,27 @@ mod tests {
         let main_content = b"{ invalid main json";
         let backup_content = b"{ invalid backup json";
 
-        // Criar o ficheiro principal corrompido.
+        // Create the corrupted main file.
         std::fs::write(&path, main_content).unwrap();
 
-        // Criar um backup também corrompido.
+        // Create a corrupted backup as well.
         std::fs::write(&backup_path, backup_content).unwrap();
 
-        // Tentar abrir o armazenamento.
+        // Try to open the storage.
         let result = FileStore::new(&path);
 
-        // Deve devolver um erro de serialização.
+        // It should return a serialization error.
         assert!(matches!(result, Err(SessionStoreError::Serialization(_))));
 
-        // O ficheiro principal original deve ser restaurado.
+        // The original main file should be restored.
         assert!(path.exists());
         assert_eq!(std::fs::read(&path).unwrap(), main_content);
 
-        // O backup inválido também deve continuar preservado.
+        // The invalid backup should also remain preserved.
         assert!(backup_path.exists());
         assert_eq!(std::fs::read(&backup_path).unwrap(), backup_content);
 
-        // Limpar os ficheiros do teste.
+        // Clean up the test files.
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_file(backup_path);
     }
@@ -1999,29 +1999,29 @@ mod tests {
 
         let backup_path = path.with_extension("backup-valid");
 
-        // Criar um destino que impeça a restauração de um ficheiro.
+        // Create a destination that prevents restoring a file.
         std::fs::create_dir(&path).unwrap();
 
-        // Criar um backup JSON válido.
+        // Create a valid JSON backup.
         std::fs::write(
             &backup_path,
             serde_json::to_vec(&FileStoreData::default()).unwrap(),
         )
         .unwrap();
 
-        // Tentar recuperar o backup.
+        // Try to recover the backup.
         let result = FileStore::recover_backup(&path);
 
-        // A restauração deve falhar com erro de I/O.
+        // Restoration should fail with an I/O error.
         assert!(matches!(result, Err(SessionStoreError::Io(_))));
 
-        // O backup deve permanecer intacto.
+        // The backup should remain intact.
         assert!(backup_path.exists());
 
-        // O destino continua a ser um diretório.
+        // The destination remains a directory.
         assert!(path.is_dir());
 
-        // Limpar os elementos do teste.
+        // Clean up the test items.
         let _ = std::fs::remove_file(backup_path);
         let _ = std::fs::remove_dir(path);
     }
@@ -2133,7 +2133,7 @@ mod tests {
         let workers = 8;
         let sessions_per_worker = 10;
 
-        // Cada trabalhador terá a sua própria instância do FileStore.
+        // Each worker will have its own FileStore instance.
         let stores: Vec<_> = (0..workers)
             .map(|_| std::sync::Arc::new(FileStore::new(&path).unwrap()))
             .collect();
@@ -2170,7 +2170,7 @@ mod tests {
             handle.join().unwrap();
         }
 
-        // Abre uma nova instância para verificar os dados persistidos.
+        // Open a new instance to verify the persisted data.
         let reopened = FileStore::new(&path).unwrap();
 
         for worker in 0..workers {

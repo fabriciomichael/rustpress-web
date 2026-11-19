@@ -7,21 +7,21 @@ use argon2::{
 };
 use std::fmt;
 
-/// Configuração utilizada pelo algoritmo Argon2id.
+/// Configuration used by the Argon2id algorithm.
 #[derive(Debug, Clone, Copy)]
 pub struct PasswordConfig {
-    /// Quantidade de memória utilizada pelo Argon2, em KiB.
+    /// Amount of memory used by Argon2, in KiB.
     pub memory_cost: u32,
 
-    /// Número de iterações realizadas pelo algoritmo.
+    /// Number of iterations performed by the algorithm.
     pub time_cost: u32,
 
-    /// Número de lanes utilizados em paralelo.
+    /// Number of lanes used in parallel.
     pub parallelism: u32,
 
-    /// Tamanho do hash produzido, em bytes.
+    /// Size of the generated hash, in bytes.
     ///
-    /// Não pode exceder 64 bytes.
+    /// Cannot exceed 64 bytes.
     pub output_length: usize,
 }
 
@@ -36,37 +36,37 @@ impl Default for PasswordConfig {
     }
 }
 
-/// Erros que podem ocorrer durante a geração ou verificação de palavras-passe.
+/// Errors that may occur while generating or verifying passwords.
 #[derive(Debug)]
 pub enum PasswordError {
-    /// Falha ao criar os parâmetros do Argon2.
+    /// Failure to create the Argon2 parameters.
     Parameters(argon2::Error),
 
-    /// Falha ao gerar o hash.
+    /// Failure to generate the hash.
     Hashing(PasswordHashError),
 
-    /// O hash fornecido não possui um formato válido.
+    /// The provided hash does not have a valid format.
     InvalidHash(PasswordHashError),
 
-    /// Falha durante a verificação do hash.
+    /// Failure during hash verification.
     Verification(PasswordHashError),
 
-    /// A palavra-passe excede o tamanho máximo permitido.
+    /// The password exceeds the maximum allowed size.
     PasswordTooLong,
 
-    /// O algoritmo do hash não é Argon2id.
+    /// The hash algorithm is not Argon2id.
     UnsupportedAlgorithm,
 
-    /// A versão do Argon2 não é suportada.
+    /// The Argon2 version is not supported.
     UnsupportedVersion,
 
-    /// Os parâmetros do hash excedem os limites permitidos.
+    /// The hash parameters exceed the allowed limits.
     UnsupportedHashParameters,
 
-    /// O hash excede o tamanho máximo permitido.
+    /// The hash exceeds the maximum allowed size.
     HashTooLong,
 
-    /// O tamanho de saída configurado excede o limite permitido.
+    /// The configured output size exceeds the allowed limit.
     OutputLengthTooLarge,
 }
 
@@ -109,7 +109,7 @@ impl fmt::Display for PasswordError {
 
 impl std::error::Error for PasswordError {}
 
-/// Ferramentas para gerar e verificar hashes de palavras-passe.
+/// Tools for generating and verifying password hashes.
 pub struct Password;
 
 impl Password {
@@ -122,29 +122,29 @@ impl Password {
     const MAX_TIME_COST: u32 = 10;
     const MAX_PARALLELISM: u32 = 8;
 
-    /// Gera um hash Argon2id com a configuração padrão.
+    /// Generates an Argon2id hash with the default configuration.
     ///
-    /// O hash inclui os parâmetros necessários para a sua verificação.
+    /// The hash includes the parameters required for verification.
     pub fn hash(password: &str) -> Result<String, PasswordError> {
         Self::hash_with_config(password, PasswordConfig::default())
     }
 
-    /// Gera um hash Argon2id utilizando uma configuração específica.
+    /// Generates an Argon2id hash using a specific configuration.
     ///
-    /// O tamanho de saída não pode exceder 64 bytes.
-    /// Os parâmetros devem respeitar os limites de recursos do RustPress
-    /// e as restrições impostas pelo Argon2.
+    /// The output size cannot exceed 64 bytes.
+    /// The parameters must respect RustPress resource limits
+    /// and the restrictions imposed by Argon2.
     ///
-    /// # Erros
+    /// # Errors
     ///
-    /// Devolve [`PasswordError::OutputLengthTooLarge`] quando o tamanho
-    /// de saída excede 64 bytes.
-    /// Devolve [`PasswordError::UnsupportedHashParameters`] quando os
-    /// parâmetros excedem os limites definidos pelo RustPress.
-    /// Devolve [`PasswordError::Parameters`] quando os parâmetros são
-    /// inválidos segundo as regras do Argon2.
-    /// Devolve [`PasswordError::PasswordTooLong`] quando a palavra-passe
-    /// excede o comprimento máximo permitido.
+    /// Returns [`PasswordError::OutputLengthTooLarge`] when the output
+    /// size exceeds 64 bytes.
+    /// Returns [`PasswordError::UnsupportedHashParameters`] when the
+    /// parameters exceed the limits defined by RustPress.
+    /// Returns [`PasswordError::Parameters`] when the parameters are
+    /// invalid according to Argon2 rules.
+    /// Returns [`PasswordError::PasswordTooLong`] when the password
+    /// exceeds the maximum allowed length.
     pub fn hash_with_config(
         password: &str,
         config: PasswordConfig,
@@ -183,13 +183,13 @@ impl Password {
             .map_err(PasswordError::Hashing)
     }
 
-    /// Verifica se uma palavra-passe corresponde ao hash fornecido.
+    /// Verifies whether a password matches the provided hash.
     ///
-    /// Aceita exclusivamente hashes Argon2id na versão 19,
-    /// respeitando os limites de recursos definidos pelo RustPress.
+    /// Accepts only Argon2id hashes in version 19,
+    /// while respecting the resource limits defined by RustPress.
     ///
-    /// Devolve `Ok(true)` quando corresponde e `Ok(false)` quando não corresponde.
-    /// Hashes inválidos e erros de processamento são devolvidos como `Err`.
+    /// Returns `Ok(true)` when it matches and `Ok(false)` when it does not.
+    /// Invalid hashes and processing errors are returned as `Err`.
     pub fn verify(password: &str, hash: &str) -> Result<bool, PasswordError> {
         Self::validate_password(password)?;
 

@@ -1,21 +1,20 @@
-//! Tipos e ferramentas de controlo para middleware.
+//! Middleware types and control tools.
 
 use crate::{HandlerError, Request, Response};
 
-/// Resultado devolvido por um middleware avançado.
+/// Result returned by an advanced middleware.
 pub enum MiddlewareResult {
-    /// Continua a execução da cadeia de middlewares.
+    /// Continues execution of the middleware chain.
     Next,
 
-    /// Interrompe a cadeia e devolve uma resposta HTTP.
+    /// Stops the chain and returns an HTTP response.
     Respond(Response),
 
-    /// Interrompe a cadeia e encaminha o erro para o tratamento central.
+    /// Stops the chain and forwards the error to central handling.
     Error(HandlerError),
 }
 
-/// Middleware de autenticação configurável.
-/// Middleware de autenticação configurável.
+/// Configurable authentication middleware.
 pub struct AuthMiddleware<F> {
     check: F,
     unauthorized_response: Box<dyn Fn() -> Response + Send + Sync>,
@@ -25,7 +24,7 @@ impl<F> AuthMiddleware<F>
 where
     F: Fn(&Request) -> Result<bool, HandlerError> + Send + Sync + 'static,
 {
-    /// Cria um middleware com uma função de verificação de autenticação.
+    /// Creates a middleware with an authentication check function.
     pub fn new(check: F) -> Self {
         Self {
             check,
@@ -35,9 +34,9 @@ where
         }
     }
 
-    /// Define a resposta HTTP devolvida quando o utilizador não está autenticado.
+    /// Sets the HTTP response returned when the user is not authenticated.
     ///
-    /// A função fornecida é executada sempre que for necessária uma resposta.
+    /// The provided function is executed whenever a response is needed.
     pub fn unauthorized_response<G>(mut self, response: G) -> Self
     where
         G: Fn() -> Response + Send + Sync + 'static,
@@ -46,10 +45,10 @@ where
         self
     }
 
-    /// Verifica a autenticação e determina o resultado do middleware.
+    /// Checks authentication and determines the middleware result.
     ///
-    /// Devolve `Next` quando autenticado, `Respond` quando não autenticado
-    /// e `Error` quando ocorre uma falha durante a verificação.
+    /// Returns `Next` when authenticated, `Respond` when unauthenticated,
+    /// and `Error` when an authentication check fails.
     pub fn handle(&self, request: &Request) -> MiddlewareResult {
         match (self.check)(request) {
             Ok(true) => MiddlewareResult::Next,
@@ -59,7 +58,7 @@ where
     }
 }
 
-/// Middleware de autorização baseado em papéis (RBAC).
+/// Role-based authorization middleware (RBAC).
 pub struct RoleMiddleware {
     allowed_roles: Vec<String>,
     unauthorized_response: Box<dyn Fn() -> Response + Send + Sync>,
@@ -67,12 +66,12 @@ pub struct RoleMiddleware {
 }
 
 impl RoleMiddleware {
-    /// Cria um middleware que permite um determinado papel.
+    /// Creates a middleware that allows a specific role.
     pub fn new(role: impl Into<String>) -> Self {
         Self::from_roles(vec![role.into()])
     }
 
-    /// Cria um middleware que permite qualquer um dos papéis indicados.
+    /// Creates a middleware that allows any of the specified roles.
     pub fn any_of<I, S>(roles: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -93,7 +92,7 @@ impl RoleMiddleware {
         }
     }
 
-    /// Personaliza a resposta devolvida quando o utilizador não está autenticado.
+    /// Customizes the response returned when the user is not authenticated.
     pub fn unauthorized_response<G>(mut self, response: G) -> Self
     where
         G: Fn() -> Response + Send + Sync + 'static,
@@ -102,7 +101,7 @@ impl RoleMiddleware {
         self
     }
 
-    /// Personaliza a resposta devolvida quando o utilizador não tem autorização.
+    /// Customizes the response returned when the user is not authorized.
     pub fn forbidden_response<G>(mut self, response: G) -> Self
     where
         G: Fn() -> Response + Send + Sync + 'static,
@@ -111,7 +110,7 @@ impl RoleMiddleware {
         self
     }
 
-    /// Verifica a identidade do utilizador e os seus papéis.
+    /// Checks the user's identity and roles.
     pub fn handle(&self, request: &Request) -> MiddlewareResult {
         let Some(session) = request.session() else {
             return MiddlewareResult::Respond((self.unauthorized_response)());
@@ -143,16 +142,16 @@ impl RoleMiddleware {
     }
 }
 
-/// Chave utilizada para armazenar o token CSRF na sessão.
+/// Key used to store the CSRF token in the session.
 const CSRF_SESSION_KEY: &str = "_rustpress_csrf_token";
 
-/// Middleware de protecção contra ataques CSRF.
+/// CSRF attack protection middleware.
 pub struct CsrfMiddleware {
     forbidden_response: Box<dyn Fn() -> Response + Send + Sync>,
 }
 
 impl CsrfMiddleware {
-    /// Cria um middleware de protecção CSRF.
+    /// Creates a CSRF protection middleware.
     pub fn new() -> Self {
         Self {
             forbidden_response: Box::new(|| {
@@ -161,7 +160,7 @@ impl CsrfMiddleware {
         }
     }
 
-    /// Personaliza a resposta devolvida quando o token é inválido.
+    /// Customizes the response returned when the token is invalid.
     pub fn forbidden_response<F>(mut self, response: F) -> Self
     where
         F: Fn() -> Response + Send + Sync + 'static,
@@ -170,7 +169,7 @@ impl CsrfMiddleware {
         self
     }
 
-    /// Obtém o token CSRF associado à requisição.
+    /// Gets the CSRF token associated with the request.
     pub fn token(&self, request: &Request) -> Result<Option<String>, HandlerError> {
         let Some(session) = request.session() else {
             return Ok(None);
@@ -186,11 +185,11 @@ impl CsrfMiddleware {
         Ok(session.get::<String>(CSRF_SESSION_KEY))
     }
 
-    /// Verifica e valida o token CSRF da requisição.
+    /// Checks and validates the request's CSRF token.
     pub fn handle(&self, request: &Request) -> MiddlewareResult {
         let method = request.method().as_str();
 
-        // Métodos HTTP seguros não necessitam de validação.
+        // Safe HTTP methods do not require validation.
         if matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE") {
             let Some(session) = request.session() else {
                 return MiddlewareResult::Next;
@@ -206,7 +205,7 @@ impl CsrfMiddleware {
                 }
             };
 
-            // Gera um token caso ainda não exista.
+            // Generate a token if it does not exist yet.
             if !session.contains(CSRF_SESSION_KEY) {
                 let token = format!(
                     "{}{}",
@@ -243,12 +242,12 @@ impl CsrfMiddleware {
             return MiddlewareResult::Respond((self.forbidden_response)());
         };
 
-        // Primeiro procura o token no cabeçalho HTTP.
+        // First, look for the token in the HTTP header.
         let header_token = request
             .header("X-CSRF-Token")
             .and_then(|value| value.to_str().ok());
 
-        // Se não existir cabeçalho, procura o campo no formulário.
+        // If the header is absent, look for the field in the form.
         let form_token = if header_token.is_none() {
             request
                 .form()
@@ -275,7 +274,7 @@ impl Default for CsrfMiddleware {
     }
 }
 
-/// Compara dois tokens sem terminar a comparação no primeiro byte diferente.
+/// Compares two tokens without ending the comparison at the first different byte.
 fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;

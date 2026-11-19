@@ -1,7 +1,7 @@
-//! Abstracções de leitura dos pedidos HTTP.
+//! HTTP request reading abstractions.
 //!
-//! [`Request`] fornece acesso ao método, caminho, cabeçalhos, parâmetros de
-//! rota, query string e corpo HTTP.
+//! [`Request`] provides access to the HTTP method, path, headers, route
+//! parameters, query string, and request body.
 
 use crate::session::{Cookie, CookieError, Session, SessionManager};
 use crate::upload::UploadedFile;
@@ -12,12 +12,12 @@ use hyper::{
 };
 use std::sync::{Arc, Mutex};
 
-/// Representa uma requisição HTTP recebida pelo servidor.
+/// Represents an HTTP request received by the server.
 ///
-/// Esta estrutura encapsula a mensagem original do Hyper e acrescenta
-/// informações úteis para a aplicação web, nomeadamente os parâmetros de rota
-/// extraídos pelo router. A intenção é fornecer uma API simples e idiomática
-/// para os handlers registados nas rotas.
+/// This structure encapsulates the original Hyper request and adds
+/// useful information for the web application, namely route parameters
+/// extracted by the router. Its purpose is to provide a simple and idiomatic
+/// API for registered route handlers.
 pub struct Request {
     inner: hyper::Request<Bytes>,
     params: Vec<(String, String)>,
@@ -29,8 +29,8 @@ pub struct Request {
 }
 
 impl Request {
-    /// Cria uma nova instância de `Request` com a requisição HTTP original e os
-    /// parâmetros de rota já resolvidos.
+    /// Creates a new `Request` instance with the original HTTP request and
+    /// the already resolved route parameters.
     pub(crate) fn new(inner: hyper::Request<Bytes>, params: Vec<(String, String)>) -> Self {
         Self {
             inner,
@@ -43,30 +43,30 @@ impl Request {
         }
     }
 
-    /// Devolve a sessão associada à requisição.
+    /// Returns the session associated with the request.
     ///
-    /// Retorna `None` quando a gestão de sessões não está activada.
+    /// Returns `None` when session management is not enabled.
     pub fn session(&self) -> Option<Arc<Mutex<Session>>> {
         self.session.clone()
     }
 
-    /// Associa uma sessão ao pedido HTTP.
+    /// Associates a session with the HTTP request.
     pub(crate) fn set_session(&mut self, session: Arc<Mutex<Session>>) {
         self.session = Some(session);
     }
 
-    /// Associa o gestor de sessões ao pedido HTTP.
+    /// Associates the session manager with the HTTP request.
     pub(crate) fn set_session_manager(&mut self, manager: Arc<SessionManager>) {
         self.session_manager = Some(manager);
     }
 
-    /// Regenera o identificador da sessão actual.
+    /// Regenerates the current session identifier.
     ///
-    /// Mantém os dados existentes, mas substitui o identificador
-    /// por um novo UUID.
+    /// Preserves existing data but replaces the identifier
+    /// with a new UUID.
     ///
-    /// Retorna `false` se as sessões não estiverem activadas
-    /// ou se não for possível bloquear a sessão.
+    /// Returns `false` if sessions are not enabled
+    /// or if the session cannot be locked.
     pub fn regenerate_session(&self) -> Result<bool, crate::session::SessionError> {
         let (Some(session), Some(manager)) = (&self.session, &self.session_manager) else {
             return Ok(false);
@@ -81,30 +81,29 @@ impl Request {
         Ok(true)
     }
 
-    /// Devolve o método HTTP utilizado na requisição, como `GET`, `POST`,
-    /// `PUT`, `PATCH` ou `DELETE`.
+    /// Returns the HTTP method used in the request, such as `GET`, `POST`,
+    /// `PUT`, `PATCH`, or `DELETE`.
     pub fn method(&self) -> &Method {
         self.inner.method()
     }
 
-    /// Devolve o caminho da URL da requisição sem incluir a query string.
+    /// Returns the request URL path without the query string.
     ///
-    /// Por exemplo, para `/utilizadores/42?activo=true`, este método devolve
+    /// For example, for `/utilizadores/42?activo=true`, this method returns
     /// `/utilizadores/42`.
     pub fn path(&self) -> &str {
         self.inner.uri().path()
     }
 
-    /// Procura um cabeçalho HTTP específico e devolve o valor correspondente,
-    /// caso exista.
+    /// Looks up a specific HTTP header and returns its value, if present.
     pub fn header(&self, name: &str) -> Option<&HeaderValue> {
         self.inner.headers().get(name)
     }
 
-    /// Devolve todos os cookies recebidos na requisição.
+    /// Returns all cookies received in the request.
     ///
-    /// Suporta vários cabeçalhos Cookie.
-    /// Retorna erro se algum cabeçalho não puder ser interpretado como texto.
+    /// Supports multiple Cookie headers.
+    /// Returns an error if any header cannot be interpreted as text.
     pub fn cookies(&self) -> Result<Vec<Cookie>, CookieError> {
         let mut cookies = Vec::new();
 
@@ -117,11 +116,11 @@ impl Request {
         Ok(cookies)
     }
 
-    /// Procura um cookie pelo nome.
+    /// Looks up a cookie by name.
     ///
-    /// Retorna Ok(None) quando o cookie não existe.
-    /// Retorna erro quando o cookie é inválido, duplicado
-    /// ou quando um cabeçalho não pode ser interpretado.
+    /// Returns Ok(None) when the cookie does not exist.
+    /// Returns an error when the cookie is invalid, duplicated,
+    /// or when a header cannot be interpreted.
     pub fn cookie(&self, name: &str) -> Result<Option<String>, CookieError> {
         let headers = self
             .inner
@@ -134,10 +133,11 @@ impl Request {
         Cookie::get_unique_from_headers(headers, name)
     }
 
-    /// Devolve o valor de um parâmetro de rota.
+    /// Returns the value of a route parameter.
     ///
-    /// Suporta rotas como `/utilizadores/:id`, permitindo obter o valor do
-    /// segmento dinâmico através do nome definido, por exemplo `param("id")`.
+    /// Supports routes such as `/utilizadores/:id`, allowing the value of a
+    /// dynamic segment to be retrieved using its defined name, for example
+    /// `param("id")`.
     pub fn param(&self, name: &str) -> Option<&str> {
         self.params
             .iter()
@@ -145,9 +145,9 @@ impl Request {
             .map(|(_, value)| value.as_str())
     }
 
-    /// Devolve o valor de um parâmetro presente na query string da URL.
+    /// Returns the value of a parameter in the URL query string.
     ///
-    /// Exemplo: `/produtos?pagina=2&limite=10` pode ser lido com
+    /// Example: `/produtos?pagina=2&limite=10` can be accessed using
     /// `query("pagina")`.
     pub fn query(&self, name: &str) -> Option<&str> {
         let query = self.inner.uri().query()?;
@@ -159,7 +159,7 @@ impl Request {
         })
     }
 
-    /// Cria uma cópia dos metadados para o tratamento de erros.
+    /// Creates a copy of the request metadata for error handling.
     pub fn context(&self) -> RequestContext {
         RequestContext {
             method: self.inner.method().clone(),
@@ -180,26 +180,26 @@ impl Request {
         }
     }
 
-    /// Devolve o corpo HTTP da requisição como bytes.
+    /// Returns the HTTP request body as bytes.
     ///
-    /// O conteúdo é devolvido por referência, sem copiar os dados.
+    /// The content is returned by reference without copying the data.
     pub fn body(&self) -> &Bytes {
         self.inner.body()
     }
 
-    /// Devolve o corpo HTTP como texto UTF-8.
+    /// Returns the HTTP request body as UTF-8 text.
     ///
-    /// Retorna um erro quando o corpo contém uma sequência de bytes
-    /// que não representa texto UTF-8 válido.
+    /// Returns an error when the body contains a byte sequence
+    /// that does not represent valid UTF-8 text.
     pub fn text(&self) -> Result<&str, std::str::Utf8Error> {
         std::str::from_utf8(self.body())
     }
 
-    /// Converte o corpo HTTP de JSON para uma estrutura Rust.
+    /// Deserializes the HTTP request body from JSON into a Rust type.
     ///
-    /// O tipo de destino deve implementar `DeserializeOwned`.
-    /// Retorna um erro quando o conteúdo não for um JSON válido
-    /// ou não corresponder à estrutura esperada.
+    /// The target type must implement `DeserializeOwned`.
+    /// Returns an error if the content is not valid JSON
+    /// or does not match the expected structure.
     pub fn json<T>(&self) -> Result<T, serde_json::Error>
     where
         T: serde::de::DeserializeOwned,
@@ -207,12 +207,12 @@ impl Request {
         serde_json::from_slice(self.body())
     }
 
-    /// Converte o corpo HTTP para uma lista de campos de formulário.
+    /// Converts the HTTP request body into a list of form fields.
     ///
-    /// Desc codifica automaticamente caracteres percent-encoded e espaços.
-    /// Preserva a ordem original e os campos com nomes repetidos.
+    /// Automatically decodes percent-encoded characters and spaces.
+    /// Preserves the original order and fields with duplicate names.
     ///
-    /// Exemplo: `nome=Fabricio&interesses=Rust&interesses=PHP`.
+    /// Example: `nome=Fabricio&interesses=Rust&interesses=PHP`.
     pub fn form(&self) -> Vec<(String, String)> {
         if self.is_multipart {
             return self.multipart_fields.clone();
@@ -221,19 +221,19 @@ impl Request {
         form_urlencoded::parse(self.body()).into_owned().collect()
     }
 
-    /// Devolve todos os ficheiros recebidos na requisição.
+    /// Returns all files received in the request.
     pub fn files(&self) -> &[UploadedFile] {
         &self.uploaded_files
     }
 
-    /// Procura o primeiro ficheiro associado ao nome de um campo do formulário.
+    /// Looks up the first file associated with a form field name.
     pub fn file(&self, field_name: &str) -> Option<&UploadedFile> {
         self.uploaded_files
             .iter()
             .find(|file| file.field_name() == field_name)
     }
 
-    /// Associa os dados multipart processados à requisição.
+    /// Associates the processed multipart data with the request.
     pub(crate) fn set_multipart_data(
         &mut self,
         fields: Vec<(String, String)>,
@@ -248,7 +248,7 @@ impl Request {
         *self.inner.body_mut() = body;
     }
 
-    /// Remove os ficheiros armazenados quando a requisição é rejeitada.
+    /// Removes stored files when the request is rejected.
     pub(crate) async fn cleanup_uploaded_files(&mut self) {
         for file in self.uploaded_files.drain(..) {
             let _ = tokio::fs::remove_file(file.path()).await;
@@ -256,7 +256,7 @@ impl Request {
     }
 }
 
-/// Contexto leve da requisição, disponível durante o tratamento de erros.
+/// Lightweight request context available during error handling.
 #[derive(Debug, Clone)]
 pub struct RequestContext {
     method: hyper::http::Method,
@@ -267,17 +267,17 @@ pub struct RequestContext {
 }
 
 impl RequestContext {
-    /// Devolve o método HTTP da requisição.
+    /// Returns the HTTP request method.
     pub fn method(&self) -> &hyper::http::Method {
         &self.method
     }
 
-    /// Devolve o caminho da requisição.
+    /// Returns the request path.
     pub fn path(&self) -> &str {
         &self.path
     }
 
-    /// Devolve o valor de um parâmetro da rota.
+    /// Returns the value of a route parameter.
     pub fn param(&self, name: &str) -> Option<&str> {
         self.params
             .iter()
@@ -285,7 +285,7 @@ impl RequestContext {
             .map(|(_, value)| value.as_str())
     }
 
-    /// Devolve um parâmetro da query string.
+    /// Returns a query string parameter.
     pub fn query(&self, name: &str) -> Option<&str> {
         self.query.as_deref()?.split('&').find_map(|pair| {
             let (key, value) = pair.split_once('=')?;
@@ -293,7 +293,7 @@ impl RequestContext {
         })
     }
 
-    /// Devolve o valor de um cabeçalho HTTP.
+    /// Returns the value of an HTTP header.
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()

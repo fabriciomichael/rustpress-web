@@ -1,44 +1,44 @@
-//! Motor de templates HTML do RustPress.
+//! RustPress HTML template engine.
 //!
-//! [`TemplateContext`] armazena valores JSON e aplica-os a templates com
-//! variáveis, condições, ciclos, layouts e partials. A interpolação escapa
-//! valores para HTML; a renderização estrita devolve [`TemplateError`] quando
-//! encontra variáveis indefinidas ou sintaxe inválida.
+//! [`TemplateContext`] stores JSON values and applies them to templates with
+//! variables, conditions, loops, layouts, and partials. Interpolation escapes
+//! values for HTML; strict rendering returns [`TemplateError`] when it finds
+//! undefined variables or invalid syntax.
 //!
-//! # Exemplo
+//! # Example
 //!
 //! ```
 //! use rustpress_web::TemplateContext;
 //! use serde_json::json;
 //! let mut context = TemplateContext::new();
-//! context.set("titulo", json!("Catálogo"));
+//! context.set("titulo", json!("Catalog"));
 //! context.set("mostrar", json!(true));
-//! context.set("produtos", json!([{ "nome": "Teclado" }, { "nome": "Rato" }]));
+//! context.set("produtos", json!([{ "nome": "Keyboard" }, { "nome": "Mouse" }]));
 //! let html = context.render("<h1>{{titulo}}</h1>{{#if mostrar}}{{#each produtos}}<p>{{nome}}</p>{{/each}}{{/if}}");
-//! assert!(html.contains("Teclado"));
+//! assert!(html.contains("Keyboard"));
 //! ```
 //!
-//! Os caminhos de páginas, layouts e partials são caminhos do sistema de
-//! ficheiros, relativos ao directório de trabalho actual.
+//! Page, layout, and partial paths are filesystem paths relative to the
+//! current working directory.
 
 use serde_json::{Map, Value};
 use std::fmt;
 
 const MAX_TEMPLATE_DEPTH: usize = 20;
 
-/// Erros de validação e renderização de templates.
+/// Template validation and rendering errors.
 ///
-/// Inclui variáveis indefinidas, sintaxe inválida, profundidade excessiva e
-/// falhas de leitura de ficheiros.
+/// Includes undefined variables, invalid syntax, excessive depth, and
+/// file-reading failures.
 #[derive(Debug)]
 pub enum TemplateError {
-    /// Uma variável referenciada não existe no contexto.
+    /// A referenced variable does not exist in the context.
     UndefinedVariable(String),
-    /// A expressão ou estrutura de blocos do template é inválida.
+    /// The template expression or block structure is invalid.
     Syntax(String),
-    /// O template excedeu o limite de blocos aninhados permitido.
+    /// The template exceeded the allowed nesting limit.
     NestingLimitExceeded,
-    /// Ocorreu uma falha ao ler uma página, layout ou partial do disco.
+    /// A failure occurred while reading a page, layout, or partial from disk.
     Io(std::io::Error),
 }
 
@@ -78,46 +78,46 @@ impl From<std::io::Error> for TemplateError {
     }
 }
 
-/// Contexto de dados disponibilizado ao template.
+/// Data context made available to the template.
 ///
-/// Armazena valores JSON para interpolação, condições e ciclos.
+/// Stores JSON values for interpolation, conditions, and loops.
 #[derive(Debug, Clone, Default)]
 pub struct TemplateContext {
     data: Map<String, Value>,
 }
 
 impl TemplateContext {
-    /// Cria um contexto vazio.
+    /// Creates an empty context.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Adiciona ou substitui um valor.
+    /// Adds or replaces a value.
     pub fn set(&mut self, name: impl Into<String>, value: Value) {
         self.data.insert(name.into(), value);
     }
 
-    /// Obtém um valor pelo nome.
+    /// Gets a value by name.
     pub fn get(&self, name: &str) -> Option<&Value> {
         self.data.get(name)
     }
 
-    /// Devolve todos os dados do contexto.
+    /// Returns all context data.
     pub fn data(&self) -> &Map<String, Value> {
         &self.data
     }
 
-    /// Valida a estrutura dos blocos de um template sem o renderizar.
+    /// Validates the block structure of a template without rendering it.
     pub fn validate_template(template: &str) -> Result<(), TemplateError> {
         validate_template_syntax(template)
     }
 
-    /// Renderiza variáveis e condições de um template.
+    /// Renders template variables and conditions.
     pub fn render(&self, template: &str) -> String {
         let mut protected_values = Vec::new();
         let prefix = "\u{E000}RUSTPRESS_NORMAL_PROTECTED_";
 
-        // Evita conflitos com marcadores que já existam no template.
+        // Avoid conflicts with markers already present in the template.
         let mut unique_prefix = prefix.to_string();
         while template.contains(&unique_prefix) {
             unique_prefix.push('_');
@@ -147,7 +147,7 @@ impl TemplateContext {
 
         self.render_variables_with_protection(&result, protected_prefix, protected_values)
     }
-    /// Renderiza um template e devolve erro se uma variável não existir.
+    /// Renders a template and returns an error if a variable does not exist.
     pub fn render_strict(&self, template: &str) -> Result<String, TemplateError> {
         let mut prefix = "\u{E000}RUSTPRESS_PROTECTED_".to_string();
 
@@ -278,7 +278,7 @@ impl TemplateContext {
         output
     }
 
-    /// Interpreta condições e rejeita variáveis inexistentes.
+    /// Parses conditions and rejects nonexistent variables.
     fn render_conditions_strict(
         &self,
         template: &str,
@@ -376,7 +376,7 @@ impl TemplateContext {
 
                 output.push_str(&format!("{protected_prefix}{index}\u{E001}"));
             } else {
-                // Mantém expressões desconhecidas, tal como no modo normal.
+                // Keep unknown expressions, as in normal mode.
                 output.push_str(&template[start..end + 2]);
             }
 
@@ -387,7 +387,7 @@ impl TemplateContext {
         output
     }
 
-    /// Determina se um valor deve ser considerado verdadeiro.
+    /// Determines whether a value should be considered true.
     fn is_truthy(&self, key: &str) -> bool {
         match self.get(key) {
             Some(Value::Bool(value)) => *value,
@@ -523,7 +523,7 @@ impl TemplateContext {
                     }
                 }
                 Some(_) => {
-                    // O valor existe, mas não é uma coleção.
+                    // The value exists, but is not a collection.
                 }
                 None => {
                     return Err(TemplateError::UndefinedVariable(key.to_string()));
@@ -537,7 +537,7 @@ impl TemplateContext {
         Ok(output)
     }
 
-    /// Prepara uma página com layout e partials.
+    /// Prepares a page with a layout and partials.
     fn prepare_layout(
         &self,
         page_path: &str,
@@ -552,7 +552,7 @@ impl TemplateContext {
         expand_partials(&combined, partials_dir)
     }
 
-    /// Compõe uma página usando um layout e partials reutilizáveis.
+    /// Composes a page using a layout and reusable partials.
     pub fn render_with_layout(
         &self,
         page_path: &str,
@@ -562,7 +562,7 @@ impl TemplateContext {
         self.prepare_layout(page_path, layout_path, partials_dir)
             .map(|template| self.render(&template))
     }
-    /// Verifica se o nome de uma variável é válido.
+    /// Checks whether a variable name is valid.
     fn is_valid_variable_name(key: &str) -> bool {
         let mut chars = key.chars();
 
@@ -574,7 +574,7 @@ impl TemplateContext {
         chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
     }
 
-    /// Compõe uma página com layout e partials em modo estrito.
+    /// Composes a page with a layout and partials in strict mode.
     pub fn render_with_layout_strict(
         &self,
         page_path: &str,
@@ -588,7 +588,7 @@ impl TemplateContext {
 }
 
 fn validate_template_syntax(template: &str) -> Result<(), TemplateError> {
-    // Cada bloco guarda o seu tipo e se já encontrou um else.
+    // Each block stores its type and whether it has found an else.
     let mut stack: Vec<(&str, bool)> = Vec::new();
     let mut position = 0;
 
@@ -716,7 +716,7 @@ fn validate_template_syntax(template: &str) -> Result<(), TemplateError> {
     Ok(())
 }
 
-/// Encontra o fecho de um bloco if, respeitando blocos aninhados.
+/// Finds the closing point of an if block while respecting nested blocks.
 fn find_matching_if(template: &str, body_start: usize) -> Option<(usize, Option<usize>)> {
     let mut position = body_start;
     let mut depth = 0usize;
@@ -780,7 +780,7 @@ fn find_matching_each(template: &str, body_start: usize) -> Option<(usize, usize
     }
 }
 
-/// Converte valores JSON para texto.
+/// Converts JSON values to text.
 fn value_to_string(value: &Value) -> String {
     match value {
         Value::String(value) => value.clone(),
@@ -789,7 +789,7 @@ fn value_to_string(value: &Value) -> String {
     }
 }
 
-/// Escapa caracteres especiais de HTML.
+/// Escapes special HTML characters.
 fn escape_html(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -799,7 +799,7 @@ fn escape_html(value: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
-/// Substitui {{> nome}} pelo conteúdo de views/partials/nome.html.
+/// Replaces {{> name}} with the contents of views/partials/name.html.
 fn expand_partials(template: &str, partials_dir: &str) -> std::io::Result<String> {
     fn expand(
         template: &str,
@@ -1192,7 +1192,7 @@ mod tests {
 
         fs::create_dir_all(&dir).unwrap();
 
-        // Vinte inclusões devem ser permitidas.
+        // Twenty inclusions should be allowed.
         for index in 0..20 {
             let content = if index == 19 {
                 "Fim".to_string()
@@ -1206,7 +1206,7 @@ mod tests {
         let result = expand_partials("{{> partial_0}}", dir.to_str().unwrap());
         assert_eq!(result.unwrap(), "Fim");
 
-        // A vigésima primeira inclusão deve ser rejeitada.
+        // The twenty-first inclusion should be rejected.
         fs::write(dir.join("partial_19.html"), "{{> partial_20}}").unwrap();
         fs::write(dir.join("partial_20.html"), "Fim").unwrap();
 
@@ -1603,7 +1603,7 @@ mod tests {
         )
         .unwrap();
 
-        // O partial contém um bloco if sem fecho.
+        // The partial contains an if block with no closing tag.
         fs::write(&partial, "{{#if titulo}}<h1>Olá</h1>").unwrap();
 
         let context = TemplateContext::new();

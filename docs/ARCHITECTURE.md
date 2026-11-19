@@ -1,60 +1,60 @@
-# Arquitectura do RustPress Web
+# RustPress Web Architecture
 
-Este documento descreve a arquitectura interna do RustPress Web, os seus principais componentes e o fluxo de processamento dos pedidos HTTP.
+This document describes the internal architecture of RustPress Web, its main components, and the HTTP request processing flow.
 
-## 1. Visão geral
+## 1. Overview
 
-O RustPress Web é um framework HTTP assíncrono e minimalista para Rust, construído sobre Hyper 1 e Tokio.
+RustPress Web is a minimalist asynchronous HTTP framework for Rust, built on Hyper 1 and Tokio.
 
-A arquitectura organiza-se em torno de uma API pública para definição da aplicação, processamento de pedidos, construção de respostas, middleware, sessões, templates, logging e tratamento de erros.
+The architecture is organized around a public API for application definition, request processing, response construction, middleware, sessions, templates, logging, and error handling.
 
-Os módulos `router` e `server` são internos e não fazem parte da API pública.
+The `router` and `server` modules are internal and are not part of the public API.
 
-## 2. Organização dos módulos
+## 2. Module Organization
 
-| Módulo | Responsabilidade |
+| Module | Responsibility |
 |---|---|
-| `app` | Define a aplicação e disponibiliza os métodos de configuração e registo de rotas. |
-| `request` | Encapsula os dados do pedido HTTP e disponibiliza métodos para consultar cabeçalhos, parâmetros, corpo e sessões. |
-| `response` | Permite construir respostas HTTP, definir status, cabeçalhos, cookies, redireccionamentos e conteúdo. |
-| `router` | Gere internamente as rotas, os middlewares, as sessões e o tratamento de erros. |
-| `middleware` | Implementa middlewares de autenticação, autorização por funções e protecção CSRF. |
-| `handler_error` | Define a estrutura de erros utilizados pelos handlers e pelo sistema de tratamento de erros. |
-| `session` | Gere sessões, cookies, configuração, armazenamento e ciclo de vida das sessões. |
-| `template` | Disponibiliza o motor de templates, variáveis, condições, ciclos, layouts e partials. |
-| `logger` | Disponibiliza os níveis e mecanismos de registo de eventos. |
-| `server` | Implementa internamente o servidor TCP assíncrono e a integração com Hyper. |
+| `app` | Defines the application and provides methods for configuration and route registration. |
+| `request` | Encapsulates HTTP request data and provides methods for accessing headers, parameters, body, and sessions. |
+| `response` | Allows building HTTP responses, setting status codes, headers, cookies, redirects, and content. |
+| `router` | Internally manages routes, middleware, sessions, and error handling. |
+| `middleware` | Implements authentication middleware, role-based authorization, and CSRF protection. |
+| `handler_error` | Defines the error structure used by handlers and the error handling system. |
+| `session` | Manages sessions, cookies, configuration, storage, and session lifecycle. |
+| `template` | Provides the template engine, variables, conditionals, loops, layouts, and partials. |
+| `logger` | Provides logging levels and event logging mechanisms. |
+| `server` | Internally implements the asynchronous TCP server and Hyper integration. |
 
-## 3. Componente App
+## 3. App Component
 
-A estrutura `App` representa a aplicação web e constitui o principal ponto de entrada da API pública.
+The `App` structure represents the web application and serves as the main entry point of the public API.
 
-É responsável por registar rotas e configurar os recursos disponibilizados pelo framework.
+It is responsible for registering routes and configuring the resources provided by the framework.
 
-Entre os seus métodos encontram-se:
+Its methods include:
 
-- `App::new()` — cria uma nova aplicação.
-- `get()`, `post()`, `put()`, `patch()` e `delete()` — registam rotas HTTP com handlers que devolvem `Result<Response, HandlerError>`, permitindo respostas normais ou a propagação de erros.
-- `use_middleware()` — regista middleware.
-- `use_middleware_advanced()` — regista middleware com controlo avançado de execução.
-- `use_sessions()` — activa a gestão de sessões.
-- `set_error_handler()` — configura o handler global de erros.
-- `set_log_level()` — configura o nível de logging.
-- `static_files()` — configura a disponibilização de ficheiros estáticos.
-- `listen()` — inicia o servidor numa determinada porta ou endereço.
-- `serve_listener()` — permite servir a aplicação através de um `TcpListener` existente.
+- `App::new()` — creates a new application.
+- `get()`, `post()`, `put()`, `patch()`, and `delete()` — register HTTP routes with handlers that return `Result<Response, HandlerError>`, allowing normal responses or error propagation.
+- `use_middleware()` — registers middleware.
+- `use_middleware_advanced()` — registers middleware with advanced execution control.
+- `use_sessions()` — enables session management.
+- `set_error_handler()` — configures the global error handler.
+- `set_log_level()` — configures the logging level.
+- `static_files()` — configures static file serving.
+- `listen()` — starts the server on a specific port or address.
+- `serve_listener()` — allows the application to be served through an existing `TcpListener`.
 
-A estrutura `App` utiliza internamente o `Router` para gerir o processamento dos pedidos.
+The `App` structure internally uses the `Router` to manage request processing.
 
-## 4. Gestão de rotas
+## 4. Route Management
 
-O `Router` é um componente interno responsável por associar os métodos e caminhos HTTP aos respectivos handlers.
+The `Router` is an internal component responsible for mapping HTTP methods and paths to their respective handlers.
 
-As rotas são armazenadas internamente através de uma estrutura baseada no método HTTP e no caminho.
+Routes are stored internally using a structure based on the HTTP method and path.
 
-O framework suporta parâmetros dinâmicos, utilizando a sintaxe `:param`.
+The framework supports dynamic parameters using the `:param` syntax.
 
-Exemplo:
+Example:
 
 ```rust
 app.get("/users/:id", |req, _res| {
@@ -62,3 +62,4 @@ app.get("/users/:id", |req, _res| {
 
     Response::new().send(format!("User: {id}"))
 });
+```

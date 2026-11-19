@@ -1,36 +1,36 @@
-//! Gestão de sessões e cookies do RustPress.
+//! RustPress session and cookie management.
 
-/// Representação e leitura de cookies HTTP.
+/// HTTP cookie representation and parsing.
 pub mod cookie;
 
-/// Configurações das sessões e dos cookies.
+/// Session and cookie configuration.
 pub mod config;
 
-/// Armazenamento interno dos dados das sessões.
+/// Internal storage for session data.
 pub mod store;
 
-/// Gestão dos dados individuais de uma sessão.
+/// Management of individual session data.
 ///
-/// Mantém o caminho público `session::session` por compatibilidade.
+/// Keeps the public `session::session` path for compatibility.
 #[allow(clippy::module_inception)]
 pub mod session;
 
-/// Gestão centralizada do ciclo de vida das sessões.
+/// Centralized session lifecycle management.
 pub mod manager;
 
-/// Erros que podem ocorrer durante operações com sessões.
+/// Errors that can occur during session operations.
 #[derive(Debug)]
 pub enum SessionError {
-    /// O mutex interno da sessão foi envenenado.
+    /// The session's internal mutex was poisoned.
     LockPoisoned,
 
-    /// Ocorreu um erro no armazenamento da sessão.
+    /// An error occurred in session storage.
     Store(SessionStoreError),
 
-    /// Ocorreu um erro relacionado com cookies.
+    /// A cookie-related error occurred.
     Cookie(CookieError),
 
-    /// A configuração necessária para gerir a sessão não está disponível.
+    /// The configuration required to manage the session is unavailable.
     Configuration,
 }
 

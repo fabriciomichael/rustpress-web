@@ -1,10 +1,9 @@
-//! Configuração de aplicações RustPress.
+//! RustPress application configuration.
 //!
-//! [`App`] é a fachada usada para registar rotas, middlewares, ficheiros
-//! estáticos, handlers de erro e iniciar o servidor.
+//! [`App`] is the facade used to register routes, middleware, static files,
+//! error handlers, and start the server.
 //!
-//! Os caminhos de ficheiros são interpretados relativamente ao directório
-//! de trabalho do processo.
+//! File paths are interpreted relative to the process working directory.
 
 use hyper::http::Method;
 
@@ -28,7 +27,7 @@ use std::{
 
 type ServerError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Representa uma rota que ainda não foi registada no Router.
+/// Represents a route that has not yet been registered with the Router.
 struct PendingRoute {
     method: Method,
     path: String,
@@ -36,7 +35,7 @@ struct PendingRoute {
     middlewares: Vec<Middleware>,
 }
 
-/// Permite configurar um conjunto de rotas com um prefixo comum.
+/// Allows configuring a set of routes with a common prefix.
 pub struct RouteGroup {
     prefix: String,
     middlewares: Vec<Middleware>,
@@ -44,7 +43,7 @@ pub struct RouteGroup {
 }
 
 impl RouteGroup {
-    /// Junta o prefixo do grupo ao caminho da rota.
+    /// Combines the group prefix with the route path.
     fn join_paths(prefix: &str, path: &str) -> String {
         let prefix = prefix.trim_end_matches('/');
         let path = path.trim_start_matches('/');
@@ -58,7 +57,7 @@ impl RouteGroup {
         }
     }
 
-    /// Regista temporariamente uma rota fallible no grupo.
+    /// Temporarily registers a fallible route in the group.
     fn add_fallible<F>(&mut self, method: Method, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -77,9 +76,9 @@ impl RouteGroup {
         Ok(())
     }
 
-    /// Regista um middleware simples no grupo.
+    /// Registers simple middleware in the group.
     ///
-    /// O middleware será aplicado a todas as rotas do grupo.
+    /// The middleware is applied to all routes in the group.
     pub fn use_middleware<F>(&mut self, middleware: F)
     where
         F: Fn(&Request) -> Option<Response> + Send + Sync + 'static,
@@ -91,9 +90,9 @@ impl RouteGroup {
             }));
     }
 
-    /// Regista um middleware avançado no grupo.
+    /// Registers advanced middleware in the group.
     ///
-    /// Permite continuar, responder directamente ou devolver um erro.
+    /// Allows continuing execution, responding directly, or returning an error.
     pub fn use_middleware_advanced<F>(&mut self, middleware: F)
     where
         F: Fn(&Request) -> MiddlewareResult + Send + Sync + 'static,
@@ -101,10 +100,10 @@ impl RouteGroup {
         self.middlewares.push(Arc::new(middleware));
     }
 
-    /// Cria um grupo de rotas aninhado.
+    /// Creates a nested route group.
     ///
-    /// Os middlewares do grupo exterior serão executados antes
-    /// dos middlewares do grupo interior.
+    /// Middlewares from the outer group are executed before
+    /// the middlewares from the inner group.
     pub fn group<F>(&mut self, prefix: &str, configure: F) -> Result<(), String>
     where
         F: FnOnce(&mut RouteGroup) -> Result<(), String>,
@@ -128,10 +127,9 @@ impl RouteGroup {
         Ok(())
     }
 
-    /// Aplica os middlewares do grupo a todas as rotas registadas.
+    /// Applies the group's middlewares to all registered routes.
     ///
-    /// Os middlewares do grupo são colocados antes dos middlewares
-    /// específicos de cada rota.
+    /// Group middlewares are placed before route-specific middlewares.
     fn apply_middlewares(&mut self) {
         for route in &mut self.routes {
             let mut middlewares = self.middlewares.clone();
@@ -139,7 +137,8 @@ impl RouteGroup {
             route.middlewares = middlewares;
         }
     }
-    /// Regista uma rota GET.
+
+    /// Registers a GET route.
     pub fn get<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -147,7 +146,7 @@ impl RouteGroup {
         self.add_fallible(Method::GET, path, handler)
     }
 
-    /// Regista uma rota POST.
+    /// Registers a POST route.
     pub fn post<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -155,7 +154,7 @@ impl RouteGroup {
         self.add_fallible(Method::POST, path, handler)
     }
 
-    /// Regista uma rota PUT cujo handler pode devolver um erro.
+    /// Registers a PUT route whose handler may return an error.
     pub fn put<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -163,7 +162,7 @@ impl RouteGroup {
         self.add_fallible(Method::PUT, path, handler)
     }
 
-    /// Regista uma rota PATCH cujo handler pode devolver um erro.
+    /// Registers a PATCH route whose handler may return an error.
     pub fn patch<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -171,7 +170,7 @@ impl RouteGroup {
         self.add_fallible(Method::PATCH, path, handler)
     }
 
-    /// Regista uma rota DELETE cujo handler pode devolver um erro.
+    /// Registers a DELETE route whose handler may return an error.
     pub fn delete<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -180,20 +179,20 @@ impl RouteGroup {
     }
 }
 
-/// Representa a aplicação web principal do RustPress.
+/// Represents the main RustPress web application.
 ///
-/// A estrutura `App` funciona como ponto de entrada para registrar rotas,
-/// middleware e serviços estáticos e, em seguida, iniciar o servidor HTTP.
+/// The `App` structure serves as the entry point for registering routes,
+/// middleware, and static services, and then starting the HTTP server.
 pub struct App {
     router: Router,
     logger: Logger,
 }
 
 impl App {
-    /// Regista um grupo de rotas com um prefixo comum.
+    /// Registers a route group with a common prefix.
     ///
-    /// As rotas são registadas apenas se a configuração do grupo
-    /// terminar com sucesso.
+    /// Routes are registered only if the group configuration
+    /// completes successfully.
     pub fn group<F>(&mut self, prefix: &str, configure: F) -> Result<(), String>
     where
         F: FnOnce(&mut RouteGroup) -> Result<(), String>,
@@ -225,9 +224,9 @@ impl App {
         self.router.add_group_routes(routes)
     }
 
-    /// Cria uma nova instância da aplicação.
+    /// Creates a new application instance.
     ///
-    /// Normalmente é o primeiro passo antes de registar rotas e middleware.
+    /// This is normally the first step before registering routes and middleware.
     pub fn new() -> Self {
         let logger = Logger::new();
 
@@ -237,21 +236,20 @@ impl App {
         Self { router, logger }
     }
 
-    /// Activa a gestão de sessões HTTP na aplicação.
+    /// Enables HTTP session management for the application.
     ///
-    /// As sessões são armazenadas em memória e utilizam a configuração
-    /// fornecida para gerir os cookies de sessão.
-    /// Activa a gestão de sessões HTTP na aplicação.
+    /// Sessions are stored in memory and use the provided configuration
+    /// to manage session cookies.
     pub fn use_sessions(&mut self, config: SessionConfig) -> Result<(), CookieError> {
         config.validate()?;
         self.router.enable_sessions(config);
         Ok(())
     }
 
-    /// Activa a gestão de sessões com um armazenamento personalizado.
+    /// Enables session management with a custom storage backend.
     ///
-    /// Permite utilizar qualquer implementação de [`SessionStore`],
-    /// mantendo a configuração dos cookies e o tempo de vida das sessões.
+    /// Allows using any [`SessionStore`] implementation,
+    /// while preserving cookie configuration and session lifetime.
     pub fn use_session_store<S>(
         &mut self,
         config: SessionConfig,
@@ -265,20 +263,21 @@ impl App {
         Ok(())
     }
 
-    /// Activa o recebimento de ficheiros através de `multipart/form-data`.
+    /// Enables receiving files through `multipart/form-data`.
     ///
-    /// A configuração é validada antes de ser aplicada à aplicação.
+    /// The configuration is validated before being applied to the application.
     pub fn use_uploads(&mut self, config: UploadConfig) -> Result<(), UploadError> {
         config.validate()?;
         self.router.enable_uploads(config);
         Ok(())
     }
-    /// Define o nível mínimo de registo da aplicação.
+
+    /// Sets the minimum logging level for the application.
     pub fn set_log_level(&mut self, level: Level) {
         self.logger.set_level(level);
     }
 
-    /// Define o handler global para erros das rotas.
+    /// Sets the global error handler for route errors.
     pub fn set_error_handler<F>(&mut self, handler: F)
     where
         F: Fn(&crate::HandlerError, &crate::RequestContext) -> Response + Send + Sync + 'static,
@@ -286,7 +285,7 @@ impl App {
         self.router.set_error_handler(handler);
     }
 
-    /// Regista um handler GET que pode devolver um erro.
+    /// Registers a GET handler that may return an error.
     pub fn get<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -294,7 +293,7 @@ impl App {
         self.router.add_fallible(Method::GET, path, handler)
     }
 
-    /// Regista um handler POST que pode devolver um erro.
+    /// Registers a POST handler that may return an error.
     pub fn post<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -302,10 +301,10 @@ impl App {
         self.router.add_fallible(Method::POST, path, handler)
     }
 
-    /// Regista uma nova rota WebSocket.
+    /// Registers a new WebSocket route.
     ///
-    /// O handler é executado de forma assíncrona após o estabelecimento
-    /// da ligação WebSocket.
+    /// The handler is executed asynchronously after the WebSocket
+    /// connection has been established.
     pub fn ws<F, Fut>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, crate::WebSocket) -> Fut + Send + Sync + 'static,
@@ -314,18 +313,18 @@ impl App {
         self.router.add_websocket(path, handler)
     }
 
-    /// Inicia o servidor HTTP na interface e porta indicadas.
+    /// Starts the HTTP server on the specified interface and port.
     pub async fn listen(self, address: &str) -> Result<(), ServerError> {
         server::listen(address, self.router, self.logger).await
     }
 
-    /// Inicia a aplicação usando um listener TCP previamente criado.
+    /// Starts the application using a previously created TCP listener.
     ///
-    /// Este método permite configurar o socket antes de o entregar ao
-    /// RustPress. O listener é consumido pela aplicação.
+    /// This method allows configuring the socket before passing it
+    /// to RustPress. The listener is consumed by the application.
     ///
     /// # Errors
-    /// Devolve um erro se o servidor não conseguir aceitar ligações.
+    /// Returns an error if the server cannot accept connections.
     pub async fn serve_listener(
         self,
         listener: tokio::net::TcpListener,
@@ -333,7 +332,7 @@ impl App {
         server::serve(listener, self.router, self.logger).await
     }
 
-    /// Regista um handler PUT que pode devolver um erro.
+    /// Registers a PUT handler that may return an error.
     pub fn put<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -341,7 +340,7 @@ impl App {
         self.router.add_fallible(Method::PUT, path, handler)
     }
 
-    /// Regista um handler PATCH que pode devolver um erro.
+    /// Registers a PATCH handler that may return an error.
     pub fn patch<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -349,7 +348,7 @@ impl App {
         self.router.add_fallible(Method::PATCH, path, handler)
     }
 
-    /// Regista um handler DELETE que pode devolver um erro.
+    /// Registers a DELETE handler that may return an error.
     pub fn delete<F>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, Response) -> Result<Response, crate::HandlerError> + Send + Sync + 'static,
@@ -357,10 +356,10 @@ impl App {
         self.router.add_fallible(Method::DELETE, path, handler)
     }
 
-    /// Adiciona um middleware global que é executado antes do handler da rota.
+    /// Adds global middleware that runs before the route handler.
     ///
-    /// Se o middleware devolver `Some(Response)`, a resposta é interrompida e a
-    /// rota correspondente não é processada.
+    /// If the middleware returns `Some(Response)`, the response is sent
+    /// immediately and the corresponding route is not processed.
     pub fn use_middleware<F>(&mut self, middleware: F)
     where
         F: Fn(&Request) -> Option<Response> + Send + Sync + 'static,
@@ -368,10 +367,10 @@ impl App {
         self.router.use_middleware(middleware);
     }
 
-    /// Regista um middleware avançado na cadeia global.
+    /// Registers advanced middleware in the global chain.
     ///
-    /// O middleware pode continuar a execução, devolver uma resposta
-    /// imediatamente ou encaminhar um erro para o handler global.
+    /// The middleware can continue execution, return a response
+    /// immediately, or forward an error to the global handler.
     pub fn use_middleware_advanced<F>(&mut self, middleware: F)
     where
         F: Fn(&Request) -> MiddlewareResult + Send + Sync + 'static,
@@ -379,11 +378,11 @@ impl App {
         self.router.use_middleware_advanced(middleware);
     }
 
-    /// Serve ficheiros locais a partir de uma pasta do sistema de ficheiros.
+    /// Serves local files from a directory in the file system.
     ///
-    /// O argumento `url_prefix` define o prefixo do URL a partir do qual os
-    /// ficheiros ficam acessíveis, enquanto `directory` representa a pasta em
-    /// disco que será exposta publicamente.
+    /// The `url_prefix` argument defines the URL prefix from which the
+    /// files become accessible, while `directory` represents the directory
+    /// on disk that will be exposed publicly.
     pub fn static_files(&mut self, url_prefix: &str, directory: impl Into<PathBuf>) {
         let prefix = url_prefix.trim_end_matches('/').to_owned();
         let directory = directory.into();
@@ -398,7 +397,7 @@ impl App {
             let is_head = method == Method::HEAD;
             let path = req.path();
 
-            // Converte o pedido para um caminho relativo à pasta pública.
+            // Converts the request into a path relative to the public directory.
             let relative = if path == prefix {
                 ""
             } else {
@@ -411,8 +410,8 @@ impl App {
                 relative
             };
 
-            // Garante que não são permitidos acessos a caminhos absolutos,
-            // a diretórios com `..` ou a utilização de separadores Windows.
+            // Prevents access to absolute paths, directories containing `..`,
+            // or the use of Windows path separators.
             if relative.contains('\\') || relative.to_ascii_lowercase().contains("%5c") {
                 return Some(render_error_page(
                     400,
@@ -434,8 +433,8 @@ impl App {
                 ));
             }
 
-            // Resolve a raiz pública para impedir que ficheiros fora do diretório
-            // configurado sejam lidos.
+            // Resolves the public root to prevent files outside the
+            // configured directory from being read.
             let Ok(root) = fs::canonicalize(&directory) else {
                 return Some(render_error_page(
                     500,
@@ -452,8 +451,8 @@ impl App {
                 ));
             };
 
-            // Evita que ficheiros simbólicos ou caminhos manipulados apontem para
-            // fora do diretório de arquivos estáticos.
+            // Prevents symbolic links or manipulated paths from pointing
+            // outside the static files directory.
             if !file_path.starts_with(&root) || !file_path.is_file() {
                 return Some(render_error_page(
                     404,
@@ -462,8 +461,8 @@ impl App {
                 ));
             }
 
-            // Define o tipo MIME consoante a extensão do ficheiro, de forma a
-            // servir corretamente HTML, CSS, JavaScript, imagens e outros tipos.
+            // Determines the MIME type based on the file extension in order
+            // to correctly serve HTML, CSS, JavaScript, images, and other types.
             let mime = match file_path
                 .extension()
                 .and_then(|ext| ext.to_str())

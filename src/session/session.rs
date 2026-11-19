@@ -1,25 +1,25 @@
-//! Gestão dos dados individuais de uma sessão.
+//! Management of individual session data.
 
 use serde_json::{Map, Value};
 
-/// Representa uma sessão HTTP.
+/// Represents an HTTP session.
 #[derive(Debug, Clone)]
 pub struct Session {
-    /// Identificador único da sessão.
+    /// Unique session identifier.
     id: String,
 
-    /// Dados armazenados na sessão.
+    /// Data stored in the session.
     data: Map<String, Value>,
 
-    /// Indica se a sessão foi modificada.
+    /// Indicates whether the session was modified.
     modified: bool,
 
-    /// Indica se a sessão foi destruída.
+    /// Indicates whether the session was destroyed.
     destroyed: bool,
 }
 
 impl Session {
-    /// Cria uma nova sessão com um identificador e dados vazios.
+    /// Creates a new session with an identifier and empty data.
     pub fn new(id: String) -> Self {
         Self {
             id,
@@ -29,12 +29,12 @@ impl Session {
         }
     }
 
-    /// Devolve o identificador da sessão.
+    /// Returns the session identifier.
     pub fn id(&self) -> &str {
         &self.id
     }
 
-    /// Obtém um valor da sessão e converte-o para o tipo pretendido.
+    /// Gets a session value and converts it to the requested type.
     pub fn get<T>(&self, key: &str) -> Option<T>
     where
         T: serde::de::DeserializeOwned,
@@ -44,7 +44,7 @@ impl Session {
             .and_then(|value| serde_json::from_value(value.clone()).ok())
     }
 
-    /// Insere ou actualiza um valor na sessão.
+    /// Inserts or updates a value in the session.
     pub fn insert<T>(&mut self, key: impl Into<String>, value: T) -> Result<(), serde_json::Error>
     where
         T: serde::Serialize,
@@ -57,7 +57,7 @@ impl Session {
         Ok(())
     }
 
-    /// Remove um valor da sessão.
+    /// Removes a value from the session.
     pub fn remove(&mut self, key: &str) -> Option<Value> {
         let value = self.data.remove(key);
 
@@ -68,12 +68,12 @@ impl Session {
         value
     }
 
-    /// Verifica se a sessão contém determinada chave.
+    /// Checks whether the session contains the specified key.
     pub fn contains(&self, key: &str) -> bool {
         self.data.contains_key(key)
     }
 
-    /// Remove todos os dados da sessão.
+    /// Removes all data from the session.
     pub fn clear(&mut self) {
         if !self.data.is_empty() {
             self.data.clear();
@@ -81,29 +81,29 @@ impl Session {
         }
     }
 
-    /// Destrói a sessão.
+    /// Destroys the session.
     pub fn destroy(&mut self) {
         self.data.clear();
         self.destroyed = true;
         self.modified = true;
     }
 
-    /// Verifica se a sessão foi modificada.
+    /// Checks whether the session was modified.
     pub fn is_modified(&self) -> bool {
         self.modified
     }
 
-    /// Verifica se a sessão foi destruída.
+    /// Checks whether the session was destroyed.
     pub fn is_destroyed(&self) -> bool {
         self.destroyed
     }
 
-    /// Converte os dados da sessão para um valor JSON.
+    /// Converts the session data to a JSON value.
     pub(crate) fn to_value(&self) -> Value {
         Value::Object(self.data.clone())
     }
 
-    /// Restaura os dados de uma sessão a partir de um valor JSON.
+    /// Restores session data from a JSON value.
     pub(crate) fn from_value(id: String, value: Value) -> Self {
         let data = value.as_object().cloned().unwrap_or_default();
 
@@ -115,7 +115,7 @@ impl Session {
         }
     }
 
-    /// Marca a sessão como modificada.
+    /// Marks the session as modified.
     pub(crate) fn mark_modified(&mut self) {
         self.modified = true;
     }

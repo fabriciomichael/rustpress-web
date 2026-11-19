@@ -1,4 +1,4 @@
-//! Gestão centralizada do ciclo de vida das sessões.
+//! Centralized session lifecycle management.
 
 use std::{sync::Arc, time::Duration};
 
@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::{Session, SessionStore, SessionStoreError};
 
-/// Gere a criação, recuperação e persistência das sessões.
+/// Handles session creation, retrieval, and persistence.
 #[derive(Clone)]
 pub struct SessionManager {
     store: Arc<dyn SessionStore>,
@@ -14,7 +14,7 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
-    /// Cria um gestor de sessões com o armazenamento fornecido.
+    /// Creates a session manager with the provided storage.
     pub fn new<S>(store: S) -> Self
     where
         S: SessionStore + 'static,
@@ -25,7 +25,7 @@ impl SessionManager {
         }
     }
 
-    /// Cria um gestor de sessões com um tempo de vida definido.
+    /// Creates a session manager with a configured time to live.
     pub fn with_ttl<S>(store: S, ttl: Duration) -> Self
     where
         S: SessionStore + 'static,
@@ -36,12 +36,12 @@ impl SessionManager {
         }
     }
 
-    /// Cria uma nova sessão com um identificador aleatório.
+    /// Creates a new session with a random identifier.
     pub fn create(&self) -> Session {
         Session::new(Uuid::new_v4().to_string())
     }
 
-    /// Recupera uma sessão existente ou cria uma nova.
+    /// Retrieves an existing session or creates a new one.
     pub fn load(&self, session_id: &str) -> Result<Session, SessionStoreError> {
         let Ok(session_uuid) = Uuid::parse_str(session_id) else {
             return Ok(self.create());
@@ -57,7 +57,7 @@ impl SessionManager {
         }
     }
 
-    /// Guarda uma sessão no armazenamento.
+    /// Saves a session to storage.
     pub fn save(&self, session: &Session) -> Result<(), SessionStoreError> {
         if session.is_destroyed() {
             return self.destroy(session.id());
@@ -76,14 +76,14 @@ impl SessionManager {
         }
     }
 
-    /// Remove uma sessão do armazenamento.
+    /// Removes a session from storage.
     pub fn destroy(&self, session_id: &str) -> Result<(), SessionStoreError> {
         self.store.revoke_with_ttl(session_id, self.ttl)
     }
 
-    /// Regenera o identificador de uma sessão, preservando os seus dados.
+    /// Regenerates a session identifier while preserving its data.
     ///
-    /// O identificador anterior é removido do armazenamento.
+    /// The previous identifier is removed from storage.
     pub fn regenerate(&self, session: &mut Session) -> Result<(), SessionStoreError> {
         let old_id = session.id().to_string();
 
@@ -200,14 +200,14 @@ mod tests {
         let old_session = manager.load(&old_id).unwrap();
         assert_ne!(old_session.id(), old_id);
 
-        // Guarda a sessão com o novo identificador.
+        // Save the session with the new identifier.
         manager.save(&session).unwrap();
 
-        // Recupera a sessão utilizando o novo identificador.
+        // Retrieve the session using the new identifier.
         let new_id = session.id().to_string();
         let loaded_new_session = manager.load(&new_id).unwrap();
 
-        // Confirma que os dados foram persistidos.
+        // Confirm that the data was persisted.
         assert_eq!(
             loaded_new_session.get::<String>("username"),
             Some("Fabricio".to_string())
@@ -246,26 +246,26 @@ mod tests {
 
         let old_id = session.id().to_string();
 
-        // Simula duas requisições que carregaram a mesma sessão.
+        // Simulate two requests that loaded the same session.
         let mut stale_session = manager.load(&old_id).unwrap();
         let mut active_session = manager.load(&old_id).unwrap();
 
-        // A requisição activa regenera a sessão.
+        // The active request regenerates the session.
         manager.regenerate(&mut active_session).unwrap();
 
-        // Tenta reutilizar o identificador antigo.
+        // Try to reuse the old identifier.
         let result = store.set(old_id.clone(), serde_json::json!({"user_id": 999}));
 
         assert_eq!(result, Err(SessionStoreError::RevokedSession));
 
-        // A requisição antiga tenta guardar a sessão anterior.
+        // The old request tries to save the previous session.
         stale_session.insert("request", "old").unwrap();
 
         let result = manager.save(&stale_session);
 
         assert_eq!(result, Err(SessionStoreError::RevokedSession));
 
-        // O identificador antigo não deve voltar a ser válido.
+        // The old identifier must not become valid again.
         let restored = manager.load(&old_id).unwrap();
 
         assert_ne!(restored.id(), old_id);
@@ -349,7 +349,7 @@ mod tests {
 
         assert!(store.get(&session_id).unwrap().is_none());
 
-        // Tenta guardar novamente dados com o ID revogado.
+        // Try to save data again using the revoked ID.
         let result = store.set(session_id.clone(), serde_json::json!({"user_id": 456}));
 
         assert_eq!(result, Err(SessionStoreError::RevokedSession));
@@ -370,12 +370,12 @@ mod tests {
 
         manager.destroy(&old_id).unwrap();
 
-        // Tenta restaurar dados usando o ID destruído.
+        // Try to restore data using the destroyed ID.
         let result = store.set(old_id.clone(), serde_json::json!({"user_id": 456}));
 
         assert_eq!(result, Err(SessionStoreError::RevokedSession));
 
-        // O gestor deve criar uma sessão com outro identificador.
+        // The manager should create a session with another identifier.
         let new_session = manager.load(&old_id).unwrap();
 
         assert_ne!(new_session.id(), old_id);
@@ -395,7 +395,7 @@ mod tests {
 
         manager.destroy(&old_id).unwrap();
 
-        // A tentativa de reutilização deve ser bloqueada.
+        // The reuse attempt should be blocked.
         let result = store.set(old_id.clone(), serde_json::json!({"user_id": 456}));
 
         assert_eq!(result, Err(SessionStoreError::RevokedSession));

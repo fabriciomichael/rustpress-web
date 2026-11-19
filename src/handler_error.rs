@@ -1,12 +1,12 @@
-//! Tipo de erro usado pelos handlers e middlewares do RustPress.
+//! Error type used by RustPress handlers and middleware.
 //!
-//! [`HandlerError`] transporta uma mensagem e um código HTTP de erro. Por
-//! omissão, os erros representam HTTP 500; use [`HandlerError::with_status`]
-//! para estados entre 400 e 599.
+//! [`HandlerError`] carries a message and an HTTP error status code. By
+//! default, errors represent HTTP 500; use [`HandlerError::with_status`]
+//! for status codes between 400 and 599.
 
 use std::{error::Error, fmt};
 
-/// Erro devolvido por um handler do RustPress.
+/// Error returned by a RustPress handler.
 #[derive(Debug)]
 pub struct HandlerError {
     public_message: String,
@@ -16,7 +16,7 @@ pub struct HandlerError {
 }
 
 impl HandlerError {
-    /// Cria um erro interno do servidor (500).
+    /// Creates an internal server error (500).
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             public_message: message.into(),
@@ -26,10 +26,10 @@ impl HandlerError {
         }
     }
 
-    /// Cria um erro com um código HTTP personalizado.
+    /// Creates an error with a custom HTTP status code.
     ///
-    /// Apenas aceita códigos entre 400 e 599.
-    /// Códigos inválidos são substituídos por 500.
+    /// Only accepts status codes between 400 and 599.
+    /// Invalid codes are replaced with 500.
     pub fn with_status(status: u16, message: impl Into<String>) -> Self {
         Self {
             status: if (400..=599).contains(&status) {
@@ -41,7 +41,7 @@ impl HandlerError {
         }
     }
 
-    /// Cria um erro com mensagem pública e detalhes técnicos.
+    /// Creates an error with a public message and technical details.
     pub fn with_details(public_message: impl Into<String>, details: impl Into<String>) -> Self {
         Self {
             details: Some(details.into()),
@@ -49,7 +49,7 @@ impl HandlerError {
         }
     }
 
-    /// Cria um erro com código HTTP, mensagem pública e detalhes técnicos.
+    /// Creates an error with an HTTP status code, public message, and technical details.
     pub fn with_status_and_details(
         status: u16,
         public_message: impl Into<String>,
@@ -61,7 +61,7 @@ impl HandlerError {
         }
     }
 
-    /// Associa a causa original ao erro.
+    /// Associates the original cause with the error.
     pub fn with_source<E>(mut self, source: E) -> Self
     where
         E: Error + Send + Sync + 'static,
@@ -70,22 +70,22 @@ impl HandlerError {
         self
     }
 
-    /// Devolve o código HTTP associado ao erro.
+    /// Returns the HTTP status code associated with the error.
     pub fn status(&self) -> u16 {
         self.status
     }
 
-    /// Devolve a mensagem pública do erro.
+    /// Returns the public error message.
     pub fn public_message(&self) -> &str {
         &self.public_message
     }
 
-    /// Devolve os detalhes técnicos, quando disponíveis.
+    /// Returns the technical details, if available.
     pub fn details(&self) -> Option<&str> {
         self.details.as_deref()
     }
 
-    /// Converte um erro externo num HandlerError, preservando a sua causa.
+    /// Converts an external error into a HandlerError, preserving its cause.
     pub fn from_error<E>(error: E) -> Self
     where
         E: Error + Send + Sync + 'static,

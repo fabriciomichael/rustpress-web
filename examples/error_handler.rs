@@ -4,7 +4,7 @@ use rustpress_web::{App, HandlerError, Request, Response};
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut app = App::new();
 
-    // Define o tratamento global de erros.
+    // Defines global error handling.
     app.set_error_handler(|error: &HandlerError, context| {
         eprintln!(
             "[RustPress] Erro {} em {} {}: {}",
@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         ))
     });
 
-    // Rota de teste que provoca intencionalmente um erro 500.
+    // Test route that intentionally triggers a 500 error.
     app.get("/erro", |_req: Request, _res: Response| {
         Err(HandlerError::new("Erro interno de teste"))
     })?;

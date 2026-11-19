@@ -1,28 +1,28 @@
-//! Representação e leitura de cookies HTTP.
+//! HTTP cookie representation and parsing.
 
-/// Representa um cookie recebido num pedido HTTP.
+/// Represents a cookie received in an HTTP request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cookie {
-    /// Nome do cookie.
+    /// Cookie name.
     pub name: String,
 
-    /// Valor do cookie.
+    /// Cookie value.
     pub value: String,
 }
 
-/// Erros encontrados durante a criação de um cabeçalho Set-Cookie.
+/// Errors encountered while creating a Set-Cookie header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CookieError {
-    /// Nome do cookie inválido.
+    /// Invalid cookie name.
     InvalidName,
 
-    /// Valor do cookie inválido.
+    /// Invalid cookie value.
     InvalidValue,
 
-    /// Caminho ou domínio inválido.
+    /// Invalid path or domain.
     InvalidAttribute,
 
-    /// Cabeçalho Cookie inválido.
+    /// Invalid Cookie header.
     InvalidHeader,
 }
 
@@ -47,7 +47,7 @@ impl std::fmt::Display for CookieError {
 impl std::error::Error for CookieError {}
 
 impl Cookie {
-    /// Cria um novo cookie.
+    /// Creates a new cookie.
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -55,7 +55,7 @@ impl Cookie {
         }
     }
 
-    /// Procura um cookie pelo nome num cabeçalho HTTP `Cookie`.
+    /// Searches for a cookie by name in an HTTP `Cookie` header.
     pub fn get(header: &str, name: &str) -> Option<String> {
         Self::parse(header)
             .into_iter()
@@ -63,7 +63,7 @@ impl Cookie {
             .map(|cookie| cookie.value)
     }
 
-    /// Procura um cookie pelo nome, rejeitando ocorrências duplicadas.
+    /// Searches for a cookie by name and rejects duplicate occurrences.
     pub fn get_unique(header: &str, name: &str) -> Result<Option<String>, CookieError> {
         if !is_valid_cookie_name(name) {
             return Err(CookieError::InvalidName);
@@ -117,7 +117,7 @@ impl Cookie {
         Ok(result)
     }
 
-    /// Procura um cookie em vários cabeçalhos, rejeitando ocorrências duplicadas.
+    /// Searches for a cookie across multiple headers and rejects duplicate occurrences.
     pub fn get_unique_from_headers<'a, I>(
         headers: I,
         name: &str,
@@ -142,9 +142,9 @@ impl Cookie {
         Ok(result)
     }
 
-    /// Interpreta um cabeçalho HTTP `Cookie`.
+    /// Parses an HTTP `Cookie` header.
     ///
-    /// Um cabeçalho pode conter vários cookies separados por ponto e vírgula.
+    /// A header can contain multiple cookies separated by semicolons.
     pub fn parse(header: &str) -> Vec<Self> {
         header
             .split(';')
@@ -169,7 +169,7 @@ impl Cookie {
             .collect()
     }
 
-    /// Gera o cabeçalho HTTP Set-Cookie usando a configuração da sessão.
+    /// Generates the HTTP Set-Cookie header using the session configuration.
     pub fn to_set_cookie(
         &self,
         config: &super::config::SessionConfig,

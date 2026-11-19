@@ -3,133 +3,131 @@
 </p>
 
 <p align="center">
-  <strong>Um framework HTTP leve para Rust, inspirado na simplicidade do Express.js.</strong>
+  <strong>A lightweight HTTP framework for Rust, inspired by the simplicity of Express.js.</strong>
 </p>
 
 <p align="center">
   <a href="https://github.com/fabriciomichael/rustpress-web">GitHub</a> ·
-  <a href="docs/ARCHITECTURE.md">Arquitectura</a> ·
-  <a href="docs/CONTRIBUTING.md">Contribuir</a>
+  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
 
-## Sobre o projecto
+## About the Project
 
-**RustPress** é um framework HTTP assíncrono para Rust, construído sobre **Hyper** e **Tokio**. O seu objectivo é oferecer uma API directa para criar servidores web e APIs, com rotas, middleware, respostas HTTP, ficheiros estáticos, templates e tratamento centralizado de erros.
+**RustPress** is an asynchronous HTTP framework for Rust, built on **Hyper** and **Tokio**. Its goal is to provide a straightforward API for building web servers and APIs, with routing, middleware, HTTP responses, static files, templates, and centralized error handling.
 
-O projecto procura combinar uma interface familiar para quem conhece o Express.js com os princípios de segurança, desempenho e controlo de tipos da linguagem Rust.
+The project aims to combine a familiar interface for developers who know Express.js with Rust's principles of safety, performance, and type safety.
 
-> O RustPress encontra-se em desenvolvimento. Consulte a API e os exemplos existentes neste repositório antes de assumir que uma funcionalidade de outros frameworks já está disponível.
+> RustPress is under active development. Check the API and existing examples in this repository before assuming that a feature available in other frameworks is already supported.
 
+## Current Features
 
-## Funcionalidades actuais
+- **Asynchronous HTTP server:** Hyper 1 and Tokio.
+- **HTTP routing:** GET, POST, PUT, PATCH, and DELETE.
+- **WebSocket:** real-time bidirectional communication with text and binary messages, dynamic route parameters, connection closing, and handshake control through global middleware. Registered using `App::ws`.
+- **Route groups:** route grouping with prefixes, nested groups, and group-specific middleware.
+- **Dynamic parameters:** patterns such as `/users/:id`.
+- **Query strings:** query parameters such as `?page=2&limit=10`.
+- **Request:** access to the body, text, JSON, URL-encoded forms, headers, cookies, parameters, and sessions.
+- **Response:** text, HTML, JSON, and binary responses, headers, status codes, cookies, and redirects.
+- **Middleware:** simple middleware and advanced middleware chains with continuation, immediate responses, or errors.
+- **Authentication and permissions:** middleware for authentication and role-based access control.
+- **CSRF protection:** token validation through headers or forms.
+- **Sessions:** session management, in-memory storage, session regeneration, and destruction.
+- **Global error handling:** global error handler and 404, 405, and 500 error pages.
+- **Password security:** password hashing and verification using Argon2id.
+- **File uploads:** multipart/form-data handling, size-limit validation, and storage using framework-generated filenames.
+- **Static files:** serving CSS, JavaScript, images, and other files from a configured directory.
+- **HTML templates:** variables, conditionals, loops, layouts, and partials, with strict validation and value escaping.
+- **Logger:** DEBUG, INFO, WARN, and ERROR levels, with colored output and server request logging.
+- **Tests:** unit and integration tests for existing features.
 
-- **Servidor HTTP assíncrono:** Hyper 1 e Tokio.
-- **Rotas HTTP:** GET, POST, PUT, PATCH e DELETE.
-- **WebSocket:** comunicação bidireccional em tempo real, com mensagens de texto e binárias, parâmetros dinâmicos nas rotas, encerramento de ligações e controlo do handshake através de middleware global. Registo através de `App::ws`.
-- **Grupos de rotas:** agrupamento de rotas com prefixos, suporte a grupos aninhados e middleware específico por grupo.
-- **Parâmetros dinâmicos:** padrões como `/utilizadores/:id`.
-- **Query strings:** consulta de parâmetros como `?pagina=2&limite=10`.
-- **Request:** leitura do corpo, texto, JSON, formulários URL-encoded, headers, cookies, parâmetros e sessões.
-- **Response:** respostas em texto, HTML, JSON e conteúdo binário, headers, códigos de estado, cookies e redireccionamentos.
-- **Middleware:** middleware simples e cadeia avançada com continuação, resposta imediata ou erro.
-- **Autenticação e permissões:** middleware de autenticação e controlo de funções ou papéis dos utilizadores.
-- **Protecção CSRF:** validação de tokens através de headers ou formulários.
-- **Sessões:** gestão de sessões, armazenamento em memória, regeneração e destruição de sessões.
-- **Tratamento global de erros:** handler global e páginas de erro 404, 405 e 500.
-- **Segurança de palavras-passe:** geração e verificação de hashes com Argon2id.
-- **Upload de ficheiros:** recepção de multipart/form-data, validação de limites e armazenamento com nomes gerados pelo framework.
-- **Ficheiros estáticos:** publicação de CSS, JavaScript, imagens e outros ficheiros a partir de uma pasta configurada.
-- **Templates HTML:** variáveis, condições, ciclos, layouts e partials, com validação rigorosa e escape de valores.
-- **Logger:** níveis DEBUG, INFO, WARN e ERROR, com saída colorida e registo de pedidos do servidor.
-- **Testes:** testes unitários e testes de integração para funcionalidades existentes.
+## Requirements
 
-## Requisitos
+- Stable Rust with support for the **2024 edition**.
+- Cargo (installed with Rust).
+- An operating system supported by Tokio and Hyper.
 
-- Rust estável com suporte à edição **2024**.
-- Cargo (instalado com Rust).
-- Sistema operativo suportado por Tokio e Hyper.
+## Building and Running the Repository
 
-## Instalação e execução do repositório
-
-Clone o projecto:
+Clone the project:
 
 ```bash
 git clone https://github.com/fabriciomichael/rustpress-web.git
 cd rustpress-web
 ```
 
-Compile e execute os testes:
+Build the project and run the tests:
 
 ```bash
 cargo build
 cargo test
 ```
 
-Execute um exemplo:
+Run an example:
 
 ```bash
 cargo run --example basic
 ```
 
+## Creating a Project with RustPress CLI
 
-## Criar um projecto com RustPress CLI
+RustPress CLI is the official tool for generating the initial structure of applications built with RustPress Web.
 
-O RustPress CLI é a ferramenta oficial para criar a estrutura inicial de aplicações que utilizam o RustPress Web.
+### Installation
 
-### Instalação
-
-Instala o CLI através do Cargo:
+Install the CLI using Cargo:
 
 ```bash
 cargo install rustpress-cli
 ```
 
-### Criar um projecto
+### Creating a Project
 
-Depois da instalação, cria um novo projecto:
+After installation, create a new project:
 
 ```bash
 rustpress new minha_app
 ```
 
-### Executar a aplicação
+### Running the Application
 
-Entra no directório criado e inicia a aplicação:
+Navigate to the generated directory and start the application:
 
 ```bash
 cd minha_app
 cargo run
 ```
 
-Por padrão, o servidor de demonstração é iniciado em:
+By default, the example server starts at:
 
 ```text
 http://127.0.0.1:3000
 ```
 
-### Comandos disponíveis
+### Available Commands
 
-Para consultar os comandos e opções do CLI:
+To view the CLI commands and options:
 
 ```bash
 rustpress --help
 ```
 
-Para consultar a versão instalada:
+To check the installed version:
 
 ```bash
 rustpress --version
 ```
 
-O projecto gerado utiliza a dependência `rustpress-web = "0.2.1"` e o runtime Tokio.
+The generated project uses the `rustpress-web = "0.2.1"` dependency and the Tokio runtime.
 
-Código-fonte do RustPress CLI: https://github.com/fabriciomichael/rustpress-cli
+RustPress CLI source code: https://github.com/fabriciomichael/rustpress-cli
 
-## Estrutura do projecto
+## Project Structure
 
-O RustPress CLI gera uma estrutura inicial semelhante à seguinte:
+RustPress CLI generates an initial project structure like the following:
 
 ```text
 minha_app/
@@ -161,14 +159,11 @@ minha_app/
 └── tests/
 ```
 
+The example server is available at `http://127.0.0.1:3000`.
 
+## Quick Start
 
-
-O servidor de demonstração fica disponível em `http://127.0.0.1:3000`.
-
-## Arranque rápido
-
-O exemplo seguinte regista rotas, lê um parâmetro dinâmico e responde a um pedido POST. Os handlers GET e POST actuais devolvem `Result<Response, HandlerError>`, por isso é possível propagar erros com `?`.
+The following example registers routes, reads a dynamic parameter, and handles a POST request. The current GET and POST handlers return `Result<Response, HandlerError>`, so errors can be propagated using `?`.
 
 ```rust
 use rustpress_web::{App, Request, Response};
@@ -201,27 +196,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 ```
 
-Guarde o código, por exemplo, em `examples/basic_api.rs`, e execute-o com:
+Save the code, for example, in `examples/basic_api.rs`, and run it with:
 
 ```bash
 cargo run --example basic_api
 ```
 
-## Rotas HTTP
+## HTTP Routes
 
-As rotas são registadas através da instância de `App`. Os métodos disponíveis são:
+Routes are registered through an `App` instance. The available methods are:
 
-| Método | Registo | Handler com erro |
+| Method | Registration | Fallible Handler |
 |---|---|---|
-| GET | `app.get(path, handler)` | Sim |
-| POST | `app.post(path, handler)` | Sim |
-| PUT | `app.put(path, handler)` | Sim |
-| PATCH | `app.patch(path, handler)` | Sim |
-| DELETE | `app.delete(path, handler)` | Sim |
+| GET | `app.get(path, handler)` | Yes |
+| POST | `app.post(path, handler)` | Yes |
+| PUT | `app.put(path, handler)` | Yes |
+| PATCH | `app.patch(path, handler)` | Yes |
+| DELETE | `app.delete(path, handler)` | Yes |
 
-O registo de uma rota devolve `Result<(), String>`; use `?` ou trate o erro para detectar padrões de rota inválidos.
+Route registration returns `Result<(), String>`; use `?` or handle the error to detect invalid route patterns.
 
-### Parâmetros de rota
+### Route Parameters
 
 ```rust
 app.get("/produtos/:id", |req: Request, res: Response| {
@@ -230,75 +225,75 @@ app.get("/produtos/:id", |req: Request, res: Response| {
 })?;
 ```
 
-### Query string
+### Query String
 
 ```rust
-// URL de exemplo: /produtos?pagina=2
+// Example URL: /produtos?pagina=2
 app.get("/produtos", |req: Request, res: Response| {
     let pagina = req.query("pagina").unwrap_or("1");
     Ok(res.send(format!("Página: {pagina}")))
 })?;
 ```
 
-### API do Request
+### Request API
 
-O tipo `Request` disponibiliza métodos para consultar os dados da requisição HTTP:
+The `Request` type provides methods for accessing HTTP request data:
 
-- `method()`: devolve o método HTTP utilizado.
-- `path()`: devolve o caminho da URL, sem a query string.
-- `header(name)`: consulta um cabeçalho HTTP.
-- `param(name)`: obtém o valor de um parâmetro dinâmico da rota.
-- `query(name)`: obtém o valor de um parâmetro da query string.
-- `cookies()`: devolve a lista de cookies recebidos.
-- `cookie(name)`: procura um cookie pelo nome.
-- `body()`: disponibiliza o corpo da requisição em bytes.
-- `text()`: interpreta o corpo como texto UTF-8.
-- `json<T>()`: converte o corpo JSON numa estrutura Rust que implemente `DeserializeOwned`.
-- `form()`: descodifica campos de formulários URL-encoded ou multipart/form-data, preservando a ordem e os nomes repetidos.
-- `files()`: devolve os ficheiros recebidos através de multipart/form-data.
-- `file(field_name)`: procura o primeiro ficheiro associado ao nome do campo.
-- `session()`: disponibiliza a sessão associada à requisição, quando activada.
-- `regenerate_session()`: regenera o identificador da sessão actual.
-- `context()`: cria uma cópia dos metadados da requisição para o tratamento de erros.
+- `method()`: returns the HTTP method used.
+- `path()`: returns the URL path without the query string.
+- `header(name)`: looks up an HTTP header.
+- `param(name)`: gets the value of a dynamic route parameter.
+- `query(name)`: gets the value of a query string parameter.
+- `cookies()`: returns the list of cookies received.
+- `cookie(name)`: looks for a cookie by name.
+- `body()`: provides the request body as bytes.
+- `text()`: parses the body as UTF-8 text.
+- `json<T>()`: converts the JSON body into a Rust structure that implements `DeserializeOwned`.
+- `form()`: decodes URL-encoded or multipart/form-data fields while preserving order and repeated names.
+- `files()`: returns files received through multipart/form-data.
+- `file(field_name)`: finds the first file associated with the field name.
+- `session()`: provides the session associated with the request when enabled.
+- `regenerate_session()`: regenerates the current session identifier.
+- `context()`: creates a copy of the request metadata for error handling.
 
 
 
-### API do Response
+### Response API
 
-O tipo `Response` disponibiliza métodos para construir respostas HTTP:
+The `Response` type provides methods for constructing HTTP responses:
 
-- `Response::new()`: cria uma resposta com estado HTTP 200.
-- `.status(code)`: define o código de estado HTTP.
-- `.status_code()`: consulta o código de estado actual.
-- `.send(body)`: envia texto simples.
-- `.html(body)`: envia conteúdo HTML.
-- `.json(body)`: envia conteúdo JSON em formato textual.
-- `Response::error(code, message)`: cria uma resposta de erro em texto simples.
-- `Response::json_error(code, message)`: cria uma resposta de erro em JSON.
-- `.header(name, value)`: adiciona ou substitui um cabeçalho HTTP.
-- `.send_bytes(bytes)`: envia conteúdo binário.
-- `.render_file(path)`: carrega um ficheiro HTML sem processar variáveis.
-- `.render_template(path, context)`: carrega e processa um template com contexto.
-- `.render(page, layout, partials_dir, context)`: renderiza uma página com layout e partials, usando validação rigorosa.
-- `Response::error_page(...)`: cria uma página de erro personalizada.
-- `.cookie(cookie, config)`: adiciona um cookie à resposta.
-- `.remove_cookie(name, config)`: envia um cabeçalho para remover um cookie.
-- `Response::redirect(path)`: cria um redireccionamento HTTP 302.
-- `Response::redirect_with_status(code, path)`: cria um redireccionamento com os estados 301, 302, 303, 307 ou 308.
+- `Response::new()`: creates a response with HTTP status 200.
+- `.status(code)`: sets the HTTP status code.
+- `.status_code()`: gets the current status code.
+- `.send(body)`: sends plain text.
+- `.html(body)`: sends HTML content.
+- `.json(body)`: sends JSON content as text.
+- `Response::error(code, message)`: creates a plain-text error response.
+- `Response::json_error(code, message)`: creates a JSON error response.
+- `.header(name, value)`: adds or replaces an HTTP header.
+- `.send_bytes(bytes)`: sends binary content.
+- `.render_file(path)`: loads an HTML file without processing variables.
+- `.render_template(path, context)`: loads and processes a template with context.
+- `.render(page, layout, partials_dir, context)`: renders a page with a layout and partials using strict validation.
+- `Response::error_page(...)`: creates a custom error page.
+- `.cookie(cookie, config)`: adds a cookie to the response.
+- `.remove_cookie(name, config)`: sends a header to remove a cookie.
+- `Response::redirect(path)`: creates an HTTP 302 redirect.
+- `Response::redirect_with_status(code, path)`: creates a redirect with status 301, 302, 303, 307, or 308.
 
-**Nota sobre JSON:** o método `.json(...)` recebe conteúdo em formato textual. Para converter estruturas Rust em JSON, pode utilizar `serde_json::json!(...).to_string()`.
+**Note about JSON:** the `.json(...)` method receives content in text format. To convert Rust structures to JSON, you can use `serde_json::json!(...).to_string()`.
 
-**Nota sobre cookies:** os métodos `cookie()` e `remove_cookie()` recebem uma configuração `SessionConfig` e devolvem um `Result`, permitindo detectar erros na criação dos cabeçalhos.
+**Note about cookies:** the `cookie()` and `remove_cookie()` methods receive a `SessionConfig` and return a `Result`, allowing header creation errors to be detected.
 
-## Comunicação WebSocket
+## WebSocket Communication
 
-O RustPress suporta comunicação bidireccional em tempo real através do protocolo **WebSocket**. Esta funcionalidade permite estabelecer ligações persistentes entre clientes e servidores, possibilitando a troca de mensagens sem necessidade de efectuar novos pedidos HTTP.
+RustPress supports real-time bidirectional communication through the **WebSocket** protocol. This feature enables persistent connections between clients and servers, allowing messages to be exchanged without making additional HTTP requests.
 
-As rotas WebSocket são registadas através do método `App::ws()`.
+WebSocket routes are registered through the `App::ws()` method.
 
-### Criar uma rota WebSocket
+### Create a WebSocket Route
 
-O exemplo seguinte implementa um servidor echo: todas as mensagens de texto recebidas são devolvidas ao cliente.
+The following example implements an echo server: every text message received is returned to the client.
 
 ```rust
 use rustpress_web::{App, Message, Request, WebSocket};
@@ -333,52 +328,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 ```
 
-Guarde o código em `examples/websocket.rs` e execute-o com:
+Save the code in `examples/websocket.rs` and run it with:
 
 ```bash
 cargo run --example websocket
 ```
 
-O servidor ficará disponível em `127.0.0.1:3000`, aguardando ligações WebSocket no caminho `/ws`.
+The server will be available at `127.0.0.1:3000`, awaiting WebSocket connections at `/ws`.
 
-### API WebSocket
+### WebSocket API
 
-O RustPress disponibiliza os seguintes tipos e métodos:
+RustPress provides the following types and methods:
 
-| Elemento | Descrição |
+| Item | Description |
 |---|---|
-| `App::ws(path, handler)` | Regista uma rota WebSocket. |
-| `WebSocket::send(message)` | Envia uma mensagem. |
-| `WebSocket::recv()` | Recebe a próxima mensagem. |
-| `WebSocket::close()` | Encerra a ligação de forma controlada. |
-| `Message::Text(String)` | Mensagem de texto UTF-8. |
-| `Message::Binary(Vec<u8>)` | Mensagem binária. |
-| `Message::Ping(Vec<u8>)` | Mensagem de controlo Ping. |
-| `Message::Pong(Vec<u8>)` | Mensagem de controlo Pong. |
-| `Message::Close` | Mensagem de encerramento. |
-| `WebSocketError` | Tipo de erro das operações WebSocket. |
+| `App::ws(path, handler)` | Registers a WebSocket route. |
+| `WebSocket::send(message)` | Sends a message. |
+| `WebSocket::recv()` | Receives the next message. |
+| `WebSocket::close()` | Closes the connection gracefully. |
+| `Message::Text(String)` | UTF-8 text message. |
+| `Message::Binary(Vec<u8>)` | Binary message. |
+| `Message::Ping(Vec<u8>)` | Ping control message. |
+| `Message::Pong(Vec<u8>)` | Pong control message. |
+| `Message::Close` | Close message. |
+| `WebSocketError` | Error type for WebSocket operations. |
 
-O método `recv()` devolve `Result<Option<Message>, WebSocketError>`. Quando recebe uma mensagem de encerramento, devolve `Ok(Some(Message::Close))`. Quando o fluxo termina sem outra mensagem, devolve `Ok(None)`.
+The `recv()` method returns `Result<Option<Message>, WebSocketError>`. When it receives a close message, it returns `Ok(Some(Message::Close))`. When the stream ends without another message, it returns `Ok(None)`.
 
-### Funcionalidades suportadas
+### Supported Features
 
-- Handshake e actualização de pedidos HTTP para WebSocket.
-- Comunicação através de mensagens de texto e binárias.
-- Mensagens de controlo Ping e Pong.
-- Rotas com parâmetros dinâmicos, como `/ws/:id`.
-- Execução dos middlewares globais antes da aceitação da ligação.
-- Encerramento controlado e detecção de desconexões.
-- Integração com sessões: permite utilizar os dados da sessão durante uma ligação WebSocket e guardar as alterações efectuadas pelo handler quando este termina.
+- HTTP request handshake and upgrade to WebSocket.
+- Text and binary message communication.
+- Ping and Pong control messages.
+- Routes with dynamic parameters, such as `/ws/:id`.
+- Execution of global middlewares before the connection is accepted.
+- Graceful closure and disconnect detection.
+- Session integration: allows session data to be used during a WebSocket connection and saves changes made by the handler when it finishes.
 
-**Nota:** os middlewares globais podem rejeitar o handshake antes de a ligação WebSocket ser estabelecida.
+**Note:** global middlewares can reject the handshake before the WebSocket connection is established.
 
-## Segurança de palavras-passe
+## Password Security
 
-O RustPress disponibiliza o módulo `security` para proteger palavras-passe através do algoritmo **Argon2id**.
+RustPress provides the `security` module for protecting passwords with the **Argon2id** algorithm.
 
-A API permite gerar hashes seguros e verificar palavras-passe sem armazenar os valores originais.
+The API allows secure hashes to be generated and passwords to be verified without storing the original values.
 
-### Gerar um hash
+### Generate a Hash
 
 ```rust
 use rustpress_web::security::Password;
@@ -394,7 +389,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Verificar uma palavra-passe
+### Verify a Password
 
 ```rust
 use rustpress_web::security::Password;
@@ -414,16 +409,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Configuração personalizada
+### Custom Configuration
 
-A configuração padrão utiliza Argon2id com os seguintes parâmetros:
+The default configuration uses Argon2id with the following parameters:
 
-- Memória: 19 456 KiB (aproximadamente 19 MiB);
-- Iterações: 2;
-- Paralelismo: 1;
-- Tamanho do hash: 32 bytes.
+- Memory: 19,456 KiB (approximately 19 MiB);
+- Iterations: 2;
+- Parallelism: 1;
+- Hash length: 32 bytes.
 
-É possível fornecer uma configuração personalizada através de `PasswordConfig` e do método `Password::hash_with_config()`. Valores inferiores aos padrões podem reduzir a resistência do hash a ataques de força bruta. Ajuste estes parâmetros tendo em conta a segurança e os recursos disponíveis no servidor.
+You can provide a custom configuration through `PasswordConfig` and the `Password::hash_with_config()` method. Values lower than the defaults may reduce the hash's resistance to brute-force attacks. Adjust these parameters according to server security and available resources.
 
 ```rust
 use rustpress_web::security::{Password, PasswordConfig};
@@ -443,11 +438,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
-## Upload de ficheiros
+## File Uploads
 
-O RustPress permite receber ficheiros através de pedidos HTTP com conteúdo `multipart/form-data`. A funcionalidade tem de ser activada explicitamente através de `App::use_uploads()`.
+RustPress allows files to be received through HTTP requests with `multipart/form-data` content. The feature must be explicitly enabled through `App::use_uploads()`.
 
-### Configurar o armazenamento
+### Configure Storage
 
 ```rust
 use rustpress_web::{App, upload::UploadConfig};
@@ -459,19 +454,19 @@ app.use_uploads(
 )?;
 ```
 
-A configuração permite definir limites para proteger a aplicação:
+The configuration allows limits to be set to protect the application:
 
-| Método | Descrição | Padrão |
+| Method | Description | Default |
 |---|---|---:|
-| `with_max_total_size(size)` | Tamanho máximo total do pedido | 25 MiB |
-| `with_max_file_size(size)` | Tamanho máximo de cada ficheiro | 10 MiB |
-| `with_max_files(count)` | Número máximo de ficheiros | 5 |
-| `with_max_fields(count)` | Número máximo de campos de texto | 32 |
-| `with_max_field_size(size)` | Tamanho máximo de cada campo de texto | 64 KiB |
+| `with_max_total_size(size)` | Maximum total request size | 25 MiB |
+| `with_max_file_size(size)` | Maximum size of each file | 10 MiB |
+| `with_max_files(count)` | Maximum number of files | 5 |
+| `with_max_fields(count)` | Maximum number of text fields | 32 |
+| `with_max_field_size(size)` | Maximum size of each text field | 64 KiB |
 
-Os tamanhos são definidos em bytes. Os limites personalizados são validados antes de serem aceites.
+Sizes are specified in bytes. Custom limits are validated before being accepted.
 
-### Receber um ficheiro
+### Receive a File
 
 ```rust
 use rustpress_web::{App, Request, Response};
@@ -496,7 +491,7 @@ app.post("/upload", |req: Request, res: Response| {
 })?;
 ```
 
-O formulário HTML correspondente pode ser:
+The corresponding HTML form can be:
 
 ```html
 <form action="/upload" method="POST" enctype="multipart/form-data">
@@ -505,30 +500,30 @@ O formulário HTML correspondente pode ser:
 </form>
 ```
 
-### Consultar ficheiros e campos
+### Inspect Files and Fields
 
-O `Request` disponibiliza:
+`Request` provides:
 
-- `file("avatar")`: procura um ficheiro pelo nome do campo.
-- `files()`: devolve a lista de ficheiros recebidos.
-- `form()`: devolve os campos de texto do formulário.
+- `file("avatar")`: finds a file by field name.
+- `files()`: returns the list of received files.
+- `form()`: returns the text fields from the form.
 
-Cada `UploadedFile` disponibiliza o nome do campo, o nome original, o nome armazenado, o caminho, o tipo de conteúdo e o tamanho.
+Each `UploadedFile` provides the field name, original name, stored name, path, content type, and size.
 
-### Segurança e limitações
+### Security and Limitations
 
-- Os ficheiros são armazenados com nomes únicos gerados pelo framework; o nome fornecido pelo cliente não é utilizado como caminho de armazenamento.
-- O nome original é disponibilizado apenas como metadado e não deve ser considerado confiável.
-- Os limites de tamanho e quantidade são aplicados durante o processamento.
-- Se o processamento falhar ou um middleware rejeitar o pedido, os ficheiros temporários ou já guardados durante esse processamento são removidos.
-- O processamento actual recebe o corpo multipart em memória antes de analisar os campos e guardar os ficheiros. Portanto, ainda não é uma implementação de upload em streaming.
-## Sessões e autenticação
+- Files are stored with unique names generated by the framework; the name supplied by the client is not used as the storage path.
+- The original name is provided only as metadata and should not be considered trustworthy.
+- Size and quantity limits are enforced during processing.
+- If processing fails or a middleware rejects the request, temporary or already saved files from that processing are removed.
+- Current processing receives the multipart body in memory before parsing fields and saving files. Therefore, it is not yet a streaming upload implementation.
+## Sessions and Authentication
 
-O RustPress disponibiliza sessões HTTP através de `App::use_sessions()`. Por padrão, os dados são guardados em memória (`MemoryStore`) e identificados por um cookie chamado `rustpress_session`.
+RustPress provides HTTP sessions through `App::use_sessions()`. By default, data is stored in memory (`MemoryStore`) and identified by a cookie named `rustpress_session`.
 
-### Activar sessões
+### Enable Sessions
 
-Active a gestão de sessões antes de iniciar o servidor:
+Enable session management before starting the server:
 
 ```rust
 use rustpress_web::{App, session::SessionConfig};
@@ -537,16 +532,16 @@ let mut app = App::new();
 app.use_sessions(SessionConfig::default())?;
 ```
 
-Pode personalizar o cookie e o tempo de vida da sessão:
+You can customize the cookie and session lifetime:
 
 ```rust
 use rustpress_web::session::{SameSite, SessionConfig};
 
 let config = SessionConfig {
     cookie_name: "minha_app_session".to_string(),
-    max_age: 60 * 60, // uma hora, em segundos
+    max_age: 60 * 60, // one hour, in seconds
     http_only: true,
-    secure: true, // produção com HTTPS
+    secure: true, // production with HTTPS
     same_site: SameSite::Lax,
     ..SessionConfig::default()
 };
@@ -554,13 +549,13 @@ let config = SessionConfig {
 app.use_sessions(config)?;
 ```
 
-Em desenvolvimento local com HTTP, mantenha `secure: false`. Em produção, use HTTPS e active `secure: true`. O armazenamento padrão é em memória: as sessões não sobrevivem ao reinício do processo nem são partilhadas entre várias instâncias da aplicação.
+For local development with HTTP, keep `secure: false`. In production, use HTTPS and enable `secure: true`. The default storage is in memory: sessions do not survive process restarts and are not shared between multiple application instances.
 
-### Armazenamento persistente com FileStore
+### Persistent Storage with FileStore
 
-Além do armazenamento em memória, o RustPress disponibiliza `FileStore`, que guarda os dados das sessões num ficheiro JSON. Assim, as sessões podem ser recuperadas depois de reiniciar a aplicação.
+In addition to in-memory storage, RustPress provides `FileStore`, which saves session data in a JSON file. Sessions can therefore be recovered after restarting the application.
 
-Para utilizar este armazenamento, configure-o através de `App::use_session_store()`:
+To use this storage, configure it through `App::use_session_store()`:
 
 ```rust
 use rustpress_web::{
@@ -575,30 +570,30 @@ let store = FileStore::new("storage/sessions.json")?;
 app.use_session_store(SessionConfig::default(), store)?;
 ```
 
-Para executar um exemplo completo com login e recuperação de sessão após reiniciar o servidor:
+To run a complete example with login and session recovery after restarting the server:
 
 ```bash
 cargo run --example file_store
 ```
 
-A aplicação ficará disponível em `http://127.0.0.1:3001`.
+The application will be available at `http://127.0.0.1:3001`.
 
-O RustPress cria automaticamente os directórios necessários quando precisar de persistir os dados.
+RustPress automatically creates the directories it needs to persist data.
 
-**Considerações importantes:**
+**Important Considerations:**
 
-- Os dados das sessões e as revogações são persistidos no ficheiro JSON.
-- As sessões com prazo de validade continuam a respeitar a expiração mesmo depois de reiniciar a aplicação.
-- O `FileStore` utiliza operações de ficheiro síncronas, que podem bloquear uma thread de execução assíncrona.
-- As operações de leitura, escrita e revogação adquirem um bloqueio exclusivo e recarregam o estado persistido antes de o modificar, evitando a perda de actualizações concorrentes.
-- Todas as instâncias que partilham o armazenamento devem utilizar o mesmo caminho de ficheiro e manter o ficheiro auxiliar `.lock` intacto durante a utilização.
-- O `FileStore` utiliza operações de ficheiro síncronas, que podem bloquear uma thread de execução assíncrona.
+- Session data and revocations are persisted in the JSON file.
+- Sessions with an expiration time continue to respect expiration even after the application restarts.
+- `FileStore` uses synchronous file operations, which can block an asynchronous execution thread.
+- Read, write, and revoke operations acquire an exclusive lock and reload persisted state before modifying it, preventing concurrent updates from being lost.
+- All instances sharing the storage must use the same file path and keep the auxiliary `.lock` file intact during use.
+- `FileStore` uses synchronous file operations, which can block an asynchronous execution thread.
 
-Utilize `MemoryStore` para aplicações que não precisam de persistência e `FileStore` quando pretende conservar as sessões entre reinícios.
+Use `MemoryStore` for applications that do not need persistence and `FileStore` when you want to preserve sessions across restarts.
 
-### Criar e guardar dados na sessão
+### Create and Save Session Data
 
-Quando as sessões estão activadas, cada pedido recebe uma sessão. Insira ou actualize os dados através de `Session::insert()`:
+When sessions are enabled, each request receives a session. Insert or update data through `Session::insert()`:
 
 ```rust
 use rustpress_web::{HandlerError, Request, Response};
@@ -620,11 +615,11 @@ app.post("/preferencias", |req: Request, _res: Response| {
 })?;
 ```
 
-O RustPress guarda automaticamente a sessão modificada no final do pedido e envia o cookie correspondente na resposta. Não é necessário chamar um método `save()` no handler.
+RustPress automatically saves the modified session at the end of the request and sends the corresponding cookie in the response. It is not necessary to call a `save()` method in the handler.
 
-### Recuperar dados e o ID do utilizador
+### Retrieve Data and the User ID
 
-Os dados são recuperados com `Session::get::<T>()`. A aplicação deve guardar explicitamente o identificador do utilizador autenticado, por exemplo na chave `user_id`:
+Data is retrieved with `Session::get::<T>()`. The application should explicitly store the authenticated user's identifier, for example under the `user_id` key:
 
 ```rust
 use rustpress_web::{HandlerError, Request, Response};
@@ -646,11 +641,11 @@ app.get("/minha-conta", |req: Request, _res: Response| {
 })?;
 ```
 
-**Importante:** `user_id` é um dado da aplicação guardado durante o login. Não é o mesmo que o identificador técnico da sessão. Este último pode ser consultado com `session.id()`, mas deve ser tratado como um segredo: não o exponha em URLs, respostas, logs públicos ou código do lado do cliente.
+**Important:** `user_id` is application data stored during login. It is not the same as the technical session identifier. The latter can be accessed with `session.id()`, but should be treated as a secret: do not expose it in URLs, responses, public logs, or client-side code.
 
-### Exemplo de login com sessão
+### Login Example with a Session
 
-O exemplo seguinte demonstra o fluxo completo. As credenciais fixas servem apenas para ilustrar a integração; numa aplicação real, consulte o utilizador na base de dados e verifique a palavra-passe com `security::Password::verify()`.
+The following example demonstrates the complete flow. The fixed credentials are only for illustrating the integration; in a real application, look up the user in the database and verify the password with `security::Password::verify()`.
 
 ```rust
 use rustpress_web::{
@@ -674,13 +669,13 @@ app.post("/login", |req: Request, _res: Response| {
         .map(|(_, value)| value.clone())
         .unwrap_or_default();
 
-    // Demonstração: substitua pela consulta à base de dados
-    // e por Password::verify(&password, &hash_guardado).
+    // Demonstration: replace this with a database query
+    // and Password::verify(&password, &stored_hash).
     if username != "demo" || password != "demo123" {
         return Ok(Response::redirect("/login?erro=credenciais"));
     }
 
-    // Renova o ID depois de autenticar, reduzindo o risco de session fixation.
+    // Regenerates the ID after authentication, reducing the risk of session fixation.
     let regenerated = req.regenerate_session()
         .map_err(HandlerError::from_error)?;
 
@@ -704,7 +699,7 @@ app.post("/login", |req: Request, _res: Response| {
 })?;
 ```
 
-Formulário HTML correspondente:
+Corresponding HTML form:
 
 ```html
 <form action="/login" method="POST">
@@ -722,9 +717,9 @@ Formulário HTML correspondente:
 </form>
 ```
 
-### Proteger uma rota
+### Protect a Route
 
-Verifique a presença de `user_id` antes de devolver conteúdo privado:
+Check for `user_id` before returning private content:
 
 ```rust
 app.get("/painel", |req: Request, _res: Response| {
@@ -744,11 +739,11 @@ app.get("/painel", |req: Request, _res: Response| {
 })?;
 ```
 
-Para aplicações maiores, também pode utilizar `AuthMiddleware` e `RoleMiddleware`. O middleware de autenticação verifica a chave `user_id`; o middleware de papéis consulta a chave `role`.
+For larger applications, you can also use `AuthMiddleware` and `RoleMiddleware`. The authentication middleware checks the `user_id` key; the role middleware checks the `role` key.
 
-### Terminar sessão (logout)
+### End a Session (Logout)
 
-Chame `Session::destroy()` para destruir a sessão actual:
+Call `Session::destroy()` to destroy the current session:
 
 ```rust
 app.post("/logout", |req: Request, _res: Response| {
@@ -764,25 +759,25 @@ app.post("/logout", |req: Request, _res: Response| {
 })?;
 ```
 
-Ao detectar uma sessão destruída, o RustPress remove-a do armazenamento, revoga o identificador e envia um cookie de remoção ao navegador. Não é necessário chamar manualmente `Response::remove_cookie()` para terminar uma sessão gerida pelo framework.
+When it detects a destroyed session, RustPress removes it from storage, revokes the identifier, and sends a removal cookie to the browser. You do not need to call `Response::remove_cookie()` manually to end a session managed by the framework.
 
-### Remover dados sem terminar a sessão
+### Remove Data Without Ending the Session
 
-Use `Session::remove()` para apagar apenas uma chave, ou `Session::clear()` para limpar todos os dados sem destruir o identificador:
+Use `Session::remove()` to delete a single key, or `Session::clear()` to clear all data without destroying the identifier:
 
 ```rust
-// Remover apenas o ID do utilizador:
+// Remove only the user ID:
 session.remove("user_id");
 
-// Remover todos os dados, mantendo a sessão:
+// Remove all data while keeping the session active:
 session.clear();
 ```
 
-Use `destroy()` para logout. Use `clear()` apenas quando pretende manter a sessão activa, mas sem os dados actuais.
+Use `destroy()` for logout. Use `clear()` only when you want to keep the session active but remove the current data.
 
-### Regenerar o identificador da sessão
+### Regenerate the Session Identifier
 
-Depois de autenticar o utilizador, regenere o identificador para reduzir o risco de session fixation:
+After authenticating the user, regenerate the identifier to reduce the risk of session fixation:
 
 ```rust
 let regenerated = req.regenerate_session()
@@ -793,13 +788,13 @@ if !regenerated {
 }
 ```
 
-A regeneração cria um novo UUID, preserva os dados existentes e revoga o identificador anterior. O novo cookie é enviado quando a sessão modificada é finalizada.
+Regeneration creates a new UUID, preserves the existing data, and revokes the previous identifier. The new cookie is sent when the modified session is finalized.
 
-## Redireccionamentos HTTP
+## HTTP Redirects
 
-O RustPress disponibiliza métodos estáticos em `Response` para redireccionar o cliente para outro caminho ou URL.
+RustPress provides static methods in `Response` for redirecting the client to another path or URL.
 
-### Redireccionamento simples
+### Simple Redirect
 
 ```rust
 app.get("/antiga-pagina", |_req: Request, _res: Response| {
@@ -807,49 +802,49 @@ app.get("/antiga-pagina", |_req: Request, _res: Response| {
 })?;
 ```
 
-`Response::redirect(path)` cria uma resposta HTTP **302 Found**, adequada para um redireccionamento temporário.
+`Response::redirect(path)` creates an HTTP **302 Found** response, suitable for a temporary redirect.
 
-### Escolher o código HTTP
+### Choose the HTTP Status Code
 
-Use `Response::redirect_with_status(code, path)` quando precisar de definir explicitamente o estado:
+Use `Response::redirect_with_status(code, path)` when you need to set the status explicitly:
 
 ```rust
-// Após um POST, encaminha o navegador para uma página GET.
+// After a POST, redirect the browser to a GET page.
 Ok(Response::redirect_with_status(303, "/resultado"))
 
-// Temporário e preserva o método HTTP e o corpo.
+// Temporary redirect that preserves the HTTP method and body.
 Ok(Response::redirect_with_status(307, "/novo-endpoint"))
 
-// Redireccionamento permanente.
+// Permanent redirect.
 Ok(Response::redirect_with_status(301, "/novo-endereco"))
 ```
 
-Códigos aceites:
+Accepted codes:
 
-| Código | Significado | Comportamento |
+| Code | Meaning | Behavior |
 |---:|---|---|
-| 301 | Moved Permanently | Redireccionamento permanente. |
-| 302 | Found | Redireccionamento temporário; é o padrão de `Response::redirect()`. |
-| 303 | See Other | Indica ao cliente que deve consultar o destino com GET; útil após POST/PUT/DELETE (Post/Redirect/Get). |
-| 307 | Temporary Redirect | Temporário e preserva o método HTTP e o corpo do pedido. |
-| 308 | Permanent Redirect | Permanente e preserva o método HTTP e o corpo do pedido. |
+| 301 | Moved Permanently | Permanent redirect. |
+| 302 | Found | Temporary redirect; the default for `Response::redirect()`. |
+| 303 | See Other | Tells the client to retrieve the destination with GET; useful after POST/PUT/DELETE (Post/Redirect/Get). |
+| 307 | Temporary Redirect | Temporary redirect that preserves the HTTP method and request body. |
+| 308 | Permanent Redirect | Permanent redirect that preserves the HTTP method and request body. |
 
-O destino pode ser um caminho local, como `/login`, ou uma URI absoluta válida. Não construa destinos a partir de dados não confiáveis do utilizador: valide-os e prefira caminhos locais conhecidos para evitar redireccionamentos abertos (*open redirects*).
+The destination can be a local path such as `/login` or a valid absolute URI. Do not construct destinations from untrusted user data: validate it and prefer known local paths to prevent open redirects.
 
-## Rotas em grupo
+## Route Groups
 
-O RustPress permite organizar rotas relacionadas em grupos através de `App::group()`. Um grupo aplica um prefixo comum aos caminhos das rotas e permite associar middlewares a todas as rotas desse grupo.
+RustPress allows related routes to be organized into groups through `App::group()`. A group applies a common prefix to route paths and allows middlewares to be associated with all routes in the group.
 
-Esta funcionalidade é útil para estruturar APIs, separar áreas públicas e privadas e organizar módulos como administração, utilizadores e produtos.
+This feature is useful for structuring APIs, separating public and private areas, and organizing modules such as administration, users, and products.
 
-### Criar um grupo de rotas
+### Create a Route Group
 
-O método `group()` recebe dois argumentos:
+The `group()` method accepts two arguments:
 
-- `prefix`: prefixo comum das rotas do grupo.
-- `configure`: closure que recebe um `RouteGroup` e regista as rotas.
+- `prefix`: common prefix for the routes in the group.
+- `configure`: closure that receives a `RouteGroup` and registers the routes.
 
-Exemplo:
+Example:
 
 ```rust
 use rustpress_web::{App, Request, Response};
@@ -877,19 +872,19 @@ app.group("/utilizadores", |users| {
 })?;
 ```
 
-As rotas registadas ficam disponíveis nos seguintes caminhos:
+The registered routes are available at the following paths:
 
-| Método | Caminho final |
+| Method | Final Path |
 |---|---|
 | GET | `/utilizadores/` |
 | GET | `/utilizadores/:id` |
 | POST | `/utilizadores/` |
 
-O prefixo é combinado automaticamente com o caminho de cada rota. Pode escrever os caminhos das rotas com ou sem a barra inicial; o RustPress normaliza a junção.
+The prefix is automatically combined with each route path. You can write route paths with or without the leading slash; RustPress normalizes the join.
 
-### Métodos HTTP disponíveis
+### Available HTTP Methods
 
-Um `RouteGroup` suporta os métodos GET, POST, PUT, PATCH e DELETE:
+A `RouteGroup` supports the GET, POST, PUT, PATCH, and DELETE methods:
 
 ```rust
 app.group("/api/produtos", |products| {
@@ -917,9 +912,9 @@ app.group("/api/produtos", |products| {
 })?;
 ```
 
-Todos os métodos de registo de rotas (GET, POST, PUT, PATCH e DELETE) aceitam handlers que devolvem `Result<Response, HandlerError>`. Assim, qualquer handler pode devolver uma resposta normal com `Ok()` ou propagar um erro com `Err()`.
+All route registration methods (GET, POST, PUT, PATCH, and DELETE) accept handlers that return `Result<Response, HandlerError>`. Thus, any handler can return a normal response with `Ok()` or propagate an error with `Err()`.
 
-Por exemplo:
+For example:
 
 ```rust
 use rustpress_web::HandlerError;
@@ -941,9 +936,9 @@ app.group("/api", |api| {
 })?;
 ```
 
-### Aplicar middleware a um grupo
+### Apply Middleware to a Group
 
-Use `use_middleware()` para associar um middleware simples a todas as rotas do grupo. Se devolver `Some(Response)`, a execução da rota é interrompida; se devolver `None`, o pedido continua:
+Use `use_middleware()` to associate a simple middleware with every route in the group. If it returns `Some(Response)`, route execution stops; if it returns `None`, the request continues:
 
 ```rust
 app.group("/admin", |admin| {
@@ -972,9 +967,9 @@ app.group("/admin", |admin| {
 })?;
 ```
 
-O exemplo utiliza um token fixo apenas para demonstrar o funcionamento do middleware. Numa aplicação real, utilize autenticação segura, sessões ou os middlewares de autenticação disponibilizados pelo RustPress.
+The example uses a fixed token only to demonstrate middleware behavior. In a real application, use secure authentication, sessions, or the authentication middlewares provided by RustPress.
 
-Para controlo mais avançado, use `use_middleware_advanced()`. Este método permite continuar a cadeia, responder directamente ou devolver um erro através de `MiddlewareResult`:
+For more advanced control, use `use_middleware_advanced()`. This method allows the chain to continue, respond directly, or return an error through `MiddlewareResult`:
 
 ```rust
 use rustpress_web::{MiddlewareResult, Response};
@@ -1000,9 +995,9 @@ app.group("/api", |api| {
 })?;
 ```
 
-### Grupos aninhados
+### Nested Groups
 
-Pode criar grupos dentro de outros grupos. Os prefixos são combinados e os middlewares são herdados na ordem de hierarquia:
+You can create groups inside other groups. Prefixes are combined and middlewares are inherited in hierarchical order:
 
 ```rust
 app.group("/admin", |admin| {
@@ -1036,22 +1031,22 @@ app.group("/admin", |admin| {
 })?;
 ```
 
-A rota de listagem do exemplo fica disponível em `GET /admin/utilizadores/`, e a rota individual em `GET /admin/utilizadores/:id`.
+The example listing route is available at `GET /admin/utilizadores/`, and the individual route is at `GET /admin/utilizadores/:id`.
 
-A ordem de execução dos middlewares é:
+The middleware execution order is:
 
-1. Middlewares globais registados na aplicação.
-2. Middlewares do grupo exterior (`/admin`).
-3. Middlewares do grupo interior (`/admin/utilizadores`).
-4. Handler da rota.
+1. Global middlewares registered in the application.
+2. Middlewares in the outer group (`/admin`).
+3. Middlewares in the inner group (`/admin/utilizadores`).
+4. Route handler.
 
-Os middlewares de um grupo são aplicados a todas as rotas desse grupo, mesmo que sejam declarados depois de algumas rotas dentro da closure.
+A group's middlewares apply to every route in that group, even if they are declared after some routes inside the closure.
 
-### Tratamento de erros e validação dos grupos
+### Group Error Handling and Validation
 
-O método `group()` devolve `Result<(), String>`; por isso, use `?` ou trate explicitamente o erro. O RustPress valida os caminhos e rejeita conflitos ou rotas duplicadas.
+The `group()` method returns `Result<(), String>`; therefore, use `?` or handle the error explicitly. RustPress validates paths and rejects conflicts or duplicate routes.
 
-A configuração do grupo é atómica: se a closure devolver um erro, ou se houver conflito ao registar as rotas, nenhuma das rotas desse grupo é adicionada à aplicação. Isto evita deixar a aplicação parcialmente configurada.
+Group configuration is atomic: if the closure returns an error or a conflict occurs while registering routes, none of that group's routes are added to the application. This prevents the application from being left partially configured.
 
 ```rust
 let result = app.group("/admin", |admin| {
@@ -1059,7 +1054,7 @@ let result = app.group("/admin", |admin| {
         Ok(Response::html("<h1>Painel</h1>"))
     })?;
 
-    // Simula uma falha durante a configuração.
+    // Simulates a failure during configuration.
     Err("Falha ao configurar o grupo".to_string())
 });
 
@@ -1068,13 +1063,13 @@ if let Err(error) = result {
 }
 ```
 
-**Nota:** os grupos organizam rotas e middlewares durante a configuração da aplicação. Não criam servidores separados nem alteram, por si só, as permissões de acesso. Para proteger rotas, associe middlewares de autenticação/autorização adequados.
+**Note:** groups organize routes and middlewares during application configuration. They do not create separate servers or alter access permissions on their own. To protect routes, attach appropriate authentication or authorization middlewares.
 
 ## Middleware
 
-### Middleware simples
+### Simple Middleware
 
-Um middleware simples recebe uma referência ao pedido. Devolve `None` para deixar o processamento continuar ou `Some(Response)` para interromper o pedido e responder imediatamente.
+A simple middleware receives a reference to the request. It returns `None` to let processing continue or `Some(Response)` to stop the request and respond immediately.
 
 ```rust
 app.use_middleware(|req: &Request| {
@@ -1086,13 +1081,13 @@ app.use_middleware(|req: &Request| {
 });
 ```
 
-### Middleware avançado
+### Advanced Middleware
 
-O middleware avançado devolve um dos valores de `MiddlewareResult`:
+An advanced middleware returns one of the `MiddlewareResult` values:
 
-- `MiddlewareResult::Next`: continua para o middleware seguinte ou para a rota;
-- `MiddlewareResult::Respond(response)`: interrompe a cadeia e envia a resposta;
-- `MiddlewareResult::Error(error)`: encaminha o erro para o tratamento central.
+- `MiddlewareResult::Next`: continues to the next middleware or route;
+- `MiddlewareResult::Respond(response)`: stops the chain and sends the response;
+- `MiddlewareResult::Error(error)`: forwards the error to central handling.
 
 ```rust
 use rustpress_web::{App, MiddlewareResult, Request, Response};
@@ -1110,13 +1105,13 @@ app.use_middleware_advanced(|req: &Request| {
 });
 ```
 
-O exemplo completo de logging através de middleware está em `examples/middleware_logging.rs`.
+The complete middleware logging example is in `examples/middleware_logging.rs`.
 
-## Tratamento de erros
+## Error Handling
 
-O RustPress disponibiliza `HandlerError` para que um handler possa devolver uma falha em vez de uma resposta normal.
+RustPress provides `HandlerError` so a handler can return a failure instead of a normal response.
 
-### Criar e devolver um erro
+### Create and Return an Error
 
 ```rust
 use rustpress_web::{App, HandlerError, Request, Response};
@@ -1134,14 +1129,14 @@ app.get("/recurso/:id", |req: Request, _res: Response| {
 })?;
 ```
 
-- `HandlerError::new(message)`: cria um erro HTTP 500.
-- `HandlerError::with_status(status, message)`: cria um erro com estado entre 400 e 599; um código fora desse intervalo é convertido em 500.
-- `HandlerError::from_error(error)`: converte um erro Rust externo num `HandlerError`.
-- Também existem conversões `From` para `String`, `&str`, `std::io::Error` e `Box<dyn Error + Send + Sync>`.
+- `HandlerError::new(message)`: creates an HTTP 500 error.
+- `HandlerError::with_status(status, message)`: creates an error with a status between 400 and 599; a code outside that range is converted to 500.
+- `HandlerError::from_error(error)`: converts an external Rust error into a `HandlerError`.
+- `From` conversions are also available for `String`, `&str`, `std::io::Error`, and `Box<dyn Error + Send + Sync>`.
 
-### Handler global de erros
+### Global Error Handler
 
-Configure `set_error_handler` para personalizar a resposta quando um handler ou middleware avançado encaminhar um erro:
+Configure `set_error_handler` to customize the response when a handler or advanced middleware forwards an error:
 
 ```rust
 app.set_error_handler(|error: &HandlerError, context| {
@@ -1159,24 +1154,24 @@ app.set_error_handler(|error: &HandlerError, context| {
 });
 ```
 
-O `RequestContext` permite consultar o método, caminho, parâmetros de rota, query string e cabeçalhos disponíveis. Evite devolver ao cliente mensagens internas, caminhos locais, credenciais ou detalhes da base de dados. Registe esses detalhes apenas nos logs apropriados.
+`RequestContext` allows access to the method, path, route parameters, query string, and available headers. Avoid returning internal messages, local paths, credentials, or database details to the client. Log those details only in appropriate logs.
 
-O router também possui respostas para rotas não encontradas (404) e métodos não permitidos (405). Os templates correspondentes estão em `views/errors/`; a página 500 é usada como fallback de erro interno. Se um template de erro não puder ser carregado, o framework mantém o código HTTP e devolve uma mensagem simples.
+The router also provides responses for routes that are not found (404) and methods that are not allowed (405). The corresponding templates are in `views/errors/`; the 500 page is used as the internal error fallback. If an error template cannot be loaded, the framework preserves the HTTP status code and returns a plain-text message.
 
-Veja `examples/error_handler.rs` para um exemplo executável.
+See `examples/error_handler.rs` for a runnable example.
 
-## Logger e mensagens de diagnóstico
+## Logger and Diagnostic Messages
 
-RustPress é uma biblioteca Rust, não um ambiente JavaScript: não existe uma função global `console.log()`. Para mensagens pontuais durante o desenvolvimento, pode usar as macros padrão `println!` e `eprintln!`. Para logging estruturado pelo framework, use `Logger`.
+RustPress is a Rust library, not a JavaScript environment: there is no global `console.log()` function. For occasional development messages, you can use the standard `println!` and `eprintln!` macros. For framework-managed structured logging, use `Logger`.
 
-Níveis disponíveis:
+Available levels:
 
 - `Level::Debug`
 - `Level::Info`
 - `Level::Warn`
 - `Level::Error`
 
-O nível mínimo pode ser definido na aplicação com `app.set_log_level(...)` ou num logger independente com `logger.set_level(...)`.
+The minimum level can be set in the application with `app.set_log_level(...)` or in an independent logger with `logger.set_level(...)`.
 
 ```rust
 use rustpress_web::{App, Level, Logger};
@@ -1195,15 +1190,15 @@ fn main() {
 }
 ```
 
-O logger inclui timestamp UTC e cores ANSI. DEBUG/INFO são enviados para stdout e WARN/ERROR para stderr. O logger interno do servidor regista o arranque, pedidos HTTP (método, caminho, estado e duração) e erros de ligação. Cada instância tem a sua configuração; clones partilham a configuração dessa instância.
+The logger includes a UTC timestamp and ANSI colors. DEBUG/INFO are sent to stdout and WARN/ERROR to stderr. The server's internal logger records startup, HTTP requests (method, path, status, and duration), and connection errors. Each instance has its own configuration; clones share that instance's configuration.
 
-Execute `cargo run --example logger` para ver os níveis em funcionamento.
+Run `cargo run --example logger` to see the levels in action.
 
-## Templates e views
+## Templates and Views
 
-O motor de templates é baseado em ficheiros HTML e em `TemplateContext`. Os caminhos são relativos ao directório de trabalho actual do processo. Para que as páginas de erro e o exemplo de views funcionem como documentado, execute a aplicação a partir da raiz do projecto e mantenha a estrutura abaixo.
+The template engine is based on HTML files and `TemplateContext`. Paths are relative to the process's current working directory. For the error pages and view example to work as documented, run the application from the project root and maintain the structure below.
 
-### Estrutura recomendada
+### Recommended Structure
 
 ```text
 rustpress-web/
@@ -1246,20 +1241,20 @@ rustpress-web/
     └── index.html
 ```
 
-**O papel de cada pasta:**
+**The role of each folder:**
 
-- `src/`: implementação interna da biblioteca.
-- `examples/`: aplicações pequenas que demonstram a API.
-- `tests/`: testes de integração.
-- `public/`: ficheiros estáticos expostos por `App::static_files`.
-- `views/`: páginas HTML e templates.
-- `views/layouts/`: estruturas comuns que envolvem o conteúdo de cada página.
-- `views/partials/`: componentes HTML reutilizáveis incluídos nos templates.
-- `views/errors/`: páginas usadas nas respostas de erro do router.
+- `src/`: internal implementation of the library.
+- `examples/`: small applications that demonstrate the API.
+- `tests/`: integration tests.
+- `public/`: static files exposed by `App::static_files`.
+- `views/`: HTML pages and templates.
+- `views/layouts/`: common structures that wrap the content of each page.
+- `views/partials/`: reusable HTML components included in templates.
+- `views/errors/`: pages used in router error responses.
 
-### Ficheiros, layouts e partials
+### Files, Layouts, and Partials
 
-O exemplo `examples/basic.rs` configura a pasta pública e carrega a página inicial:
+The `examples/basic.rs` example configures the public folder and loads the initial page:
 
 ```rust
 app.static_files("/assets", "public");
@@ -1269,13 +1264,13 @@ app.get("/", |_req: Request, res: Response| {
 })?;
 ```
 
-Com esta configuração, `public/css/style.css` fica disponível em `/assets/css/style.css`. No HTML, use:
+With this configuration, `public/css/style.css` is available at `/assets/css/style.css`. In the HTML, use:
 
 ```html
 <link rel="stylesheet" href="/assets/css/style.css">
 ```
 
-Para renderizar uma página com layout e partials, o layout deve conter o marcador de conteúdo `{{{conteudo}}}`. Os partials são referenciados pelo nome, sem extensão, e resolvidos dentro do directório indicado:
+To render a page with a layout and partials, the layout must contain the `{{{conteudo}}}` content marker. Partials are referenced by name without an extension and resolved inside the specified directory:
 
 ```html
 <!-- views/layouts/main.html -->
@@ -1293,13 +1288,13 @@ Para renderizar uma página com layout e partials, o layout deve conter o marcad
 </html>
 ```
 
-Crie os ficheiros:
+Create the files:
 
 - `views/partials/cabecalho.html`
 - `views/partials/rodape.html`
-- uma página, por exemplo `views/pages/inicio.html` (a pasta `pages` é uma convenção de organização; o caminho é passado explicitamente ao método).
+- a page, for example `views/pages/inicio.html` (the `pages` folder is an organizational convention; the path is passed explicitly to the method).
 
-Renderize a página indicando os três caminhos:
+Render the page by specifying the three paths:
 
 ```rust
 use rustpress_web::{Request, Response, TemplateContext};
@@ -1318,21 +1313,21 @@ app.get("/inicio", move |_req: Request, res: Response| {
 })?;
 ```
 
-O método `Response::render` usa renderização estrita: variáveis não definidas e erros de sintaxe fazem a resposta passar para HTTP 500. Para páginas sem layout, use `render_template`; para devolver um ficheiro HTML sem substituição de variáveis, use `render_file`.
+The `Response::render` method uses strict rendering: undefined variables and syntax errors switch the response to HTTP 500. For pages without a layout, use `render_template`; to return an HTML file without variable substitution, use `render_file`.
 
-### Sintaxe do motor de templates
+### Template Engine Syntax
 
-| Sintaxe | Significado |
+| Syntax | Meaning |
 |---|---|
-| `{{titulo}}` | Substitui uma variável do contexto. |
-| `{{#if autenticado}}...{{/if}} ` | Mostra o bloco se o valor for verdadeiro. |
-| `{{else}}` | Alternativa dentro de um bloco `if`. |
-| `{{#each produtos}}...{{/each}} ` | Repete o bloco para cada elemento de uma lista. |
-| `{{> cabecalho}}` | Inclui `views/partials/cabecalho.html` (ou o directório de partials indicado). |
+| `{{titulo}}` | Substitutes a context variable. |
+| `{{#if autenticado}}...{{/if}} ` | Shows the block if the value is true. |
+| `{{else}}` | Alternative inside an `if` block. |
+| `{{#each produtos}}...{{/each}} ` | Repeats the block for each element in a list. |
+| `{{> cabecalho}}` | Includes `views/partials/cabecalho.html` (or the specified partials directory). |
 
-Dentro de um ciclo, as propriedades de cada objecto ficam disponíveis pelo seu nome; para elementos simples, use `{{this}}`. Os valores interpolados são escapados para HTML. Os blocos podem ser aninhados até ao limite interno de profundidade; a validação estrita rejeita blocos mal formados, variáveis inexistentes e inclusões circulares de partials.
+Inside a loop, each object's properties are available by name; for simple elements, use `{{this}}`. Interpolated values are HTML-escaped. Blocks can be nested up to the internal depth limit; strict validation rejects malformed blocks, nonexistent variables, and circular partial inclusions.
 
-Exemplo de contexto:
+Context example:
 
 ```rust
 use rustpress_web::TemplateContext;
@@ -1347,56 +1342,56 @@ context.set("produtos", json!([
 ]));
 ```
 
-> **Importante:** `TemplateContext` e os métodos de renderização recebem caminhos do sistema de ficheiros. Não são caminhos URL. O directório de trabalho e a existência de layouts/partials influenciam a renderização.
+> **Important:** `TemplateContext` and the rendering methods receive filesystem paths. They are not URL paths. The working directory and the existence of layouts/partials affect rendering.
 
-## Ficheiros estáticos
+## Static Files
 
-Registe um prefixo URL e a pasta local correspondente:
+Register a URL prefix and the corresponding local folder:
 
 ```rust
 app.static_files("/assets", "public");
 ```
 
-O middleware serve pedidos GET e HEAD, determina o tipo MIME por extensão e rejeita caminhos inválidos ou tentativas de sair do directório público configurado. Não coloque segredos, ficheiros de configuração, backups ou dados privados dentro da pasta pública.
+The middleware serves GET and HEAD requests, determines the MIME type by extension, and rejects invalid paths or attempts to escape the configured public directory. Do not place secrets, configuration files, backups, or private data inside the public folder.
 
-## Exemplos disponíveis
+## Available Examples
 
-| Exemplo | Objectivo | Comando |
+| Example | Purpose | Command |
 |---|---|---|
-| `basic` | Página HTML e ficheiros estáticos | `cargo run --example basic` |
-| `error_handler` | Handler global de erros | `cargo run --example error_handler` |
-| `logger` | Níveis do logger | `cargo run --example logger` |
-| `middleware_logging` | Middleware avançado e respostas JSON | `cargo run --example middleware_logging` |
-| `file_store` | Sessões persistentes em ficheiro JSON | `cargo run --example file_store` |
-| `websocket` | Comunicação bidireccional em tempo real | `cargo run --example websocket` |
+| `basic` | HTML page and static files | `cargo run --example basic` |
+| `error_handler` | Global error handler | `cargo run --example error_handler` |
+| `logger` | Logger levels | `cargo run --example logger` |
+| `middleware_logging` | Advanced middleware and JSON responses | `cargo run --example middleware_logging` |
+| `file_store` | Persistent sessions in a JSON file | `cargo run --example file_store` |
+| `websocket` | Real-time bidirectional communication | `cargo run --example websocket` |
 
-## Ciclo de uma requisição
+## Request Lifecycle
 
-1. O servidor Tokio aceita uma ligação TCP e o Hyper processa o pedido HTTP.
-2. O router identifica o método e procura a rota compatível com o caminho.
-3. Os parâmetros dinâmicos são extraídos e disponibilizados em `Request::param`.
-4. Os middlewares registados são executados.
-5. O handler constrói uma resposta ou devolve um `HandlerError`.
-6. Erros encaminhados são tratados pelo handler global, quando configurado.
-7. A resposta RustPress é convertida para a resposta Hyper e enviada ao cliente.
+1. The Tokio server accepts a TCP connection and Hyper processes the HTTP request.
+2. The router identifies the method and searches for the route matching the path.
+3. Dynamic parameters are extracted and made available in `Request::param`.
+4. Registered middlewares are executed.
+5. The handler builds a response or returns a `HandlerError`.
+6. Forwarded errors are handled by the global handler when configured.
+7. The RustPress response is converted to a Hyper response and sent to the client.
 
-## Documentação da API (rustdoc)
+## API Documentation (rustdoc)
 
-A API pública é documentada directamente nos módulos e tipos de `src/` através de comentários Rustdoc (`///` e `//!`). A documentação inclui descrições, exemplos executáveis e notas sobre limitações conhecidas.
+The public API is documented directly in the modules and types under `src/` through Rustdoc comments (`///` and `//!`). The documentation includes descriptions, runnable examples, and notes about known limitations.
 
-Gerar a documentação HTML localmente:
+Generate the HTML documentation locally:
 
 ```bash
 cargo doc --no-deps --open
 ```
 
-Executar também os exemplos incluídos nos comentários da documentação:
+Run the examples included in the documentation comments:
 
 ```bash
 cargo test --doc
 ```
 
-Verificar a documentação e os exemplos antes de preparar uma publicação:
+Verify the documentation and examples before preparing a release:
 
 ```bash
 cargo fmt --check
@@ -1407,39 +1402,39 @@ cargo package --list
 cargo package
 ```
 
-O atributo `#![warn(missing_docs)]` está activo na crate para sinalizar itens públicos sem documentação. Antes da publicação, corrija todos os avisos e confirme que os exemplos de rustdoc compilam.
+The `#![warn(missing_docs)]` attribute is enabled in the crate to flag public items without documentation. Before release, fix all warnings and confirm that rustdoc examples compile.
 
-## Testes
+## Tests
 
-Execute a suite completa:
+Run the complete test suite:
 
 ```bash
 cargo test
 ```
 
-Para validar também os exemplos:
+To also validate the examples:
 
 ```bash
 cargo check --examples
 ```
 
-## Limitações conhecidas e funcionalidades futuras
+## Known Limitations and Future Features
 
-Apesar das funcionalidades já implementadas, algumas áreas ainda podem ser desenvolvidas:
+Despite the features already implemented, some areas remain open for future development:
 
-- **Integração com bases de dados:** suporte integrado para acesso e gestão de bases de dados.
+- **Database integration:** built-in support for database access and management.
 
-Estas funcionalidades fazem parte das possíveis evoluções do RustPress Web e deverão ser acompanhadas de APIs e testes próprios.
+These are potential future improvements to RustPress Web and should be accompanied by dedicated APIs and tests.
 
-## Documentação adicional
+## Additional Documentation
 
-- [Arquitectura do RustPress](docs/ARCHITECTURE.md)
-- [Guia de contribuição](docs/CONTRIBUTING.md)
-- [Licença MIT](LICENSE)
+- [RustPress Architecture](docs/ARCHITECTURE.md)
+- [Contributing Guide](docs/CONTRIBUTING.md)
+- [MIT License](LICENSE)
 
-## Contribuir
+## Contributing
 
-Contribuições, sugestões e relatórios de erros são bem-vindos. Antes de abrir um pull request:
+Contributions, suggestions, and bug reports are welcome. Before opening a pull request:
 
 ```bash
 cargo fmt --check
@@ -1447,13 +1442,13 @@ cargo test
 cargo check --examples
 ```
 
-Consulte [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) para o fluxo de trabalho.
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for the workflow.
 
-## Licença
+## License
 
-Este projecto está licenciado sob a licença MIT. Consulte [LICENSE](LICENSE).
+This project is licensed under the MIT license. See [LICENSE](LICENSE).
 
-## Autor e repositório
+## Author and Repository
 
-- **Autor:** Fabrício Michael
-- **Repositório:** https://github.com/fabriciomichael/rustpress-web
+- **Author:** Fabrício Michael
+- **Repository:** https://github.com/fabriciomichael/rustpress-web

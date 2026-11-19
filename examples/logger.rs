@@ -1,13 +1,13 @@
 use rustpress_web::{App, Level, Logger};
 
 fn main() {
-    let mut app = App::new();
+    let mut app: App = App::new();
 
-    // Configurar o nível de registo da aplicação.
+    // Configure the application's logging level.
     app.set_log_level(Level::Debug);
 
-    // Criar um logger independente.
-    let logger = Logger::new();
+    // Create an independent logger.
+    let logger: Logger = Logger::new();
     logger.set_level(Level::Debug);
 
     println!("--- Configuração DEBUG ---");

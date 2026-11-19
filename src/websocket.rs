@@ -1,44 +1,44 @@
-//! Tipos públicos e funcionalidades de comunicação WebSocket.
+//! Public types and WebSocket communication features.
 
-/// Representa uma mensagem recebida ou enviada através de uma ligação WebSocket.
+/// Represents a message received or sent through a WebSocket connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
-    /// Mensagem de texto UTF-8.
+    /// UTF-8 text message.
     Text(String),
 
-    /// Mensagem binária.
+    /// Binary message.
     Binary(Vec<u8>),
 
-    /// Mensagem de controlo Ping.
+    /// Ping control message.
     Ping(Vec<u8>),
 
-    /// Mensagem de controlo Pong.
+    /// Pong control message.
     Pong(Vec<u8>),
 
-    /// Encerramento da ligação.
+    /// Connection closure.
     Close,
 }
 
 use futures_util::{SinkExt, StreamExt};
 use hyper_tungstenite::{HyperWebsocket, HyperWebsocketStream};
 
-/// Representa uma ligação WebSocket activa.
+/// Represents an active WebSocket connection.
 pub struct WebSocket {
     stream: HyperWebsocketStream,
 }
 
-/// Erros que podem ocorrer durante uma comunicação WebSocket.
+/// Errors that can occur during WebSocket communication.
 pub type WebSocketError = hyper_tungstenite::tungstenite::Error;
 
 impl WebSocket {
-    /// Cria uma ligação WebSocket a partir de um pedido HTTP actualizado.
+    /// Creates a WebSocket connection from an upgraded HTTP request.
     pub async fn from_upgrade(upgrade: HyperWebsocket) -> Result<Self, WebSocketError> {
         let stream = upgrade.await?;
 
         Ok(Self { stream })
     }
 
-    /// Envia uma mensagem através da ligação WebSocket.
+    /// Sends a message through the WebSocket connection.
     pub async fn send(&mut self, message: Message) -> Result<(), WebSocketError> {
         use hyper_tungstenite::tungstenite::Message as TungsteniteMessage;
 
@@ -53,9 +53,9 @@ impl WebSocket {
         self.stream.send(message).await
     }
 
-    /// Recebe a próxima mensagem da ligação WebSocket.
+    /// Receives the next message from the WebSocket connection.
     ///
-    /// Devolve `Ok(None)` quando a ligação é encerrada.
+    /// Returns `Ok(None)` when the connection is closed.
     pub async fn recv(&mut self) -> Result<Option<Message>, WebSocketError> {
         use hyper_tungstenite::tungstenite::Message as TungsteniteMessage;
 
@@ -82,7 +82,7 @@ impl WebSocket {
         }
     }
 
-    /// Encerra a ligação WebSocket de forma controlada.
+    /// Closes the WebSocket connection gracefully.
     pub async fn close(&mut self) -> Result<(), WebSocketError> {
         self.stream.close(None).await
     }

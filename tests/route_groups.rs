@@ -131,7 +131,7 @@ fn nested_route_groups_execute_middlewares_in_correct_order() {
 
     let execution_order = std::sync::Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
 
-    // Middleware global.
+    // Global middleware.
     let global_order = std::sync::Arc::clone(&execution_order);
 
     app.use_middleware_advanced(move |_request| {
@@ -140,7 +140,7 @@ fn nested_route_groups_execute_middlewares_in_correct_order() {
     });
 
     app.group("/admin", |admin| {
-        // Criamos primeiro o grupo interior.
+        // Create the inner group first.
         admin.group("/utilizadores", |users| {
             let inner_order = std::sync::Arc::clone(&execution_order);
 
@@ -159,7 +159,7 @@ fn nested_route_groups_execute_middlewares_in_correct_order() {
             Ok(())
         })?;
 
-        // Registamos o middleware exterior depois do grupo interior.
+        // Register the outer middleware after the inner group.
         let outer_order = std::sync::Arc::clone(&execution_order);
 
         admin.use_middleware_advanced(move |_request| {

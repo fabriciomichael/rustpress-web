@@ -1,10 +1,10 @@
-//! Construção de respostas HTTP.
+//! HTTP response construction.
 //!
-//! [`Response`] mantém o estado, os cabeçalhos e o corpo até ser convertido
-//! para uma resposta Hyper. Os métodos de construção consomem e devolvem
-//! `Self`, permitindo encadear chamadas.
+//! [`Response`] keeps the state, headers, and body until conversion
+//! into a Hyper response. The builder methods consume and return
+//! `Self`, allowing chained calls.
 //!
-//! # Exemplo
+//! # Example
 //!
 //! ```
 //! use rustpress_web::Response;
@@ -24,11 +24,11 @@ use hyper::{
 use crate::TemplateContext;
 use crate::session::{Cookie, CookieError, SessionConfig};
 
-/// Representa uma resposta HTTP que será enviada ao cliente pelo servidor.
+/// Represents an HTTP response that will be sent to the client by the server.
 ///
-/// A estrutura `Response` centraliza a construção de respostas HTTP com status,
-/// conteúdo, headers e tipos MIME. Ela permite responder com texto simples,
-/// HTML, JSON, templates renderizados e conteúdo binário.
+/// The `Response` struct centralizes HTTP response construction with status,
+/// content, headers, and MIME types. It supports plain text,
+/// HTML, JSON, rendered templates, and binary content.
 pub struct Response {
     status: StatusCode,
     body: Bytes,
@@ -38,8 +38,8 @@ pub struct Response {
 }
 
 impl Response {
-    /// Cria uma resposta padrão com código `200 OK` e tipo de conteúdo em texto
-    /// plano.
+    /// Creates a default response with a `200 OK` status code and a plain-text
+    /// content type.
     pub fn new() -> Self {
         Self {
             status: StatusCode::OK,
@@ -50,7 +50,7 @@ impl Response {
         }
     }
 
-    ///Sets the HTTP status code of the response.
+    /// Sets the HTTP status code of the response.
     pub fn status(mut self, code: u16) -> Self {
         self.status = if (100..=599).contains(&code) {
             StatusCode::from_u16(code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
@@ -61,17 +61,17 @@ impl Response {
         self
     }
 
-    /// Devolve o código de estado HTTP da resposta.
+    /// Returns the HTTP status code of the response.
     pub fn status_code(&self) -> u16 {
         self.status.as_u16()
     }
 
-    /// Cria uma resposta HTTP de erro com uma mensagem em texto simples.
+    /// Creates an HTTP error response with a plain-text message.
     pub fn error(code: u16, message: impl Into<String>) -> Self {
         Self::new().status(code).send(message)
     }
 
-    /// Cria uma resposta HTTP de erro no formato JSON.
+    /// Creates an HTTP error response in JSON format.
     pub fn json_error(code: u16, message: impl Into<String>) -> Self {
         let status = if (400..=599).contains(&code) {
             code
@@ -89,22 +89,22 @@ impl Response {
         Self::new().status(status).json(body.to_string())
     }
 
-    /// Define o corpo da resposta como texto simples.
+    /// Sets the response body as plain text.
     pub fn send(mut self, body: impl Into<String>) -> Self {
         self.body = Bytes::from(body.into());
         self
     }
 
-    /// Define a resposta como HTML.
+    /// Sets the response as HTML.
     pub fn html(mut self, body: impl Into<String>) -> Self {
         self.body = Bytes::from(body.into());
         self.content_type = HeaderValue::from_static("text/html; charset=utf-8");
         self
     }
 
-    /// Define o conteúdo da resposta como JSON.
+    /// Sets the response content as JSON.
     ///
-    /// Esta função ajusta automaticamente o cabeçalho `Content-Type` para
+    /// This function automatically sets the `Content-Type` header to
     /// `application/json`.
     pub fn json(mut self, body: impl Into<String>) -> Self {
         self.body = Bytes::from(body.into());
@@ -133,17 +133,17 @@ impl Response {
         self
     }
 
-    /// Envia conteúdo binário, por exemplo, uma imagem, um ficheiro PDF ou um
-    /// asset estático.
+    /// Sends binary content, such as an image, PDF file, or static
+    /// asset.
     pub fn send_bytes(mut self, body: impl Into<Bytes>) -> Self {
         self.body = body.into();
         self
     }
 
-    /// Adiciona ou substitui um cabeçalho HTTP na resposta.
+    /// Adds or replaces an HTTP header in the response.
     ///
-    /// Se o nome do cabeçalho for `Content-Type`, o valor é aplicado também ao
-    /// campo interno `content_type` da resposta.
+    /// If the header name is `Content-Type`, the value is also applied to the
+    /// response's internal `content_type` field.
     pub fn header(mut self, name: &str, value: &str) -> Self {
         let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
             return self;
@@ -162,8 +162,8 @@ impl Response {
         self
     }
 
-    /// Converte a resposta interna para o tipo da biblioteca Hyper antes da
-    /// entrega ao cliente.
+    /// Converts the internal response to the Hyper library type before
+    /// delivery to the client.
     pub(crate) fn into_hyper(self) -> HyperResponse<Full<Bytes>> {
         let body_length = self.content_length.unwrap_or(self.body.len() as u64);
 
@@ -205,10 +205,10 @@ impl Response {
         self
     }
 
-    /// Renderiza uma página com layout e validação rigorosa das variáveis.
+    /// Renders a page with a layout and strict variable validation.
     ///
-    /// Devolve HTTP 500 quando uma variável não está definida ou ocorre
-    /// um erro ao carregar os templates ou os partials.
+    /// Returns HTTP 500 when a variable is undefined or an error occurs
+    /// while loading the templates or partials.
     pub fn render(
         mut self,
         page_path: &str,
@@ -233,10 +233,10 @@ impl Response {
         self
     }
 
-    /// Renderiza uma página de erro personalizada usando um layout e partials.
+    /// Renders a custom error page using a layout and partials.
     ///
-    /// Se a renderização falhar, mantém o código HTTP original e devolve
-    /// uma mensagem simples como alternativa.
+    /// If rendering fails, preserve the original HTTP status code and return
+    /// a plain-text message as a fallback.
     pub fn error_page(
         code: u16,
         page_path: &str,
@@ -261,9 +261,9 @@ impl Response {
         self
     }
 
-    /// Adiciona um cookie à resposta HTTP.
+    /// Adds a cookie to the HTTP response.
     ///
-    /// Permite adicionar vários cookies à mesma resposta.
+    /// Allows multiple cookies to be added to the same response.
     pub fn cookie(&mut self, cookie: &Cookie, config: &SessionConfig) -> Result<(), CookieError> {
         let value = cookie.to_set_cookie(config)?;
 
@@ -274,9 +274,9 @@ impl Response {
         Ok(())
     }
 
-    /// Remove um cookie do cliente através de um cabeçalho Set-Cookie.
+    /// Removes a cookie from the client through a Set-Cookie header.
     ///
-    /// O cookie é removido definindo Max-Age=0.
+    /// The cookie is removed by setting Max-Age=0.
     pub fn remove_cookie(&mut self, name: &str, config: &SessionConfig) -> Result<(), CookieError> {
         let cookie = Cookie::new(name, "");
 
@@ -286,14 +286,14 @@ impl Response {
         self.cookie(&cookie, &removal_config)
     }
 
-    /// Cria uma resposta de redireccionamento HTTP 302.
+    /// Creates an HTTP 302 redirect response.
     pub fn redirect(path: &str) -> Self {
         Self::redirect_with_status(302, path)
     }
 
-    /// Cria uma resposta de redireccionamento com um código HTTP específico.
+    /// Creates a redirect response with a specific HTTP status code.
     ///
-    /// Aceita apenas 301, 302, 303, 307 e 308.
+    /// Accepts only 301, 302, 303, 307, and 308.
     pub fn redirect_with_status(code: u16, path: &str) -> Self {
         let status = match code {
             301 => StatusCode::MOVED_PERMANENTLY,
@@ -654,7 +654,7 @@ mod tests {
         let page = base.join("pagina.html");
         let layout = base.join("layout.html");
 
-        // O bloco if está aberto e não tem fecho.
+        // The if block is open and has no closing brace.
         fs::write(&page, "<h1>{{#if titulo}}Olá</h1>").unwrap();
         fs::write(&layout, "<html><body>{{{conteudo}}}</body></html>").unwrap();
 
@@ -698,7 +698,7 @@ mod tests {
         let page = base.join("pagina.html");
         let layout = base.join("layout.html");
 
-        // O bloco if está aberto e não tem fecho.
+        // The if block is open and has no closing brace.
         fs::write(&page, "<h1>{{#if titulo}}Olá</h1>").unwrap();
         fs::write(&layout, "<html><body>{{{conteudo}}}</body></html>").unwrap();
 
@@ -779,7 +779,7 @@ mod tests {
         let body = String::from_utf8(response.body.to_vec()).unwrap();
         assert_eq!(body, "Internal error while rendering the page.");
 
-        // Garante que o ficheiro de teste não ficou criado.
+        // Ensures that the test file was not created.
         assert!(!path.exists());
     }
 

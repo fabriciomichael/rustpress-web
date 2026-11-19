@@ -1,24 +1,25 @@
-# Contribuir para o RustPress Web
+# Contributing to RustPress Web
 
-Obrigado pelo interesse em contribuir para o RustPress Web.
+Thank you for your interest in contributing to RustPress Web.
 
-Este documento apresenta as orientações para configurar o ambiente de desenvolvimento, modificar o código, executar testes e submeter contribuições ao projecto.
+This document provides guidelines for setting up the development environment, modifying the code, running tests, and submitting contributions to the project.
 
-## 1. Requisitos
+## 1. Requirements
 
-Para contribuir para o projecto, é necessário ter:
+To contribute to the project, you need:
 
-- Rust estável.
+- Stable Rust.
 - Cargo.
 - Git.
-- Editor ou IDE com suporte a Rust.
-- Conhecimentos básicos de Rust e desenvolvimento web.
+- A code editor or IDE with Rust support.
+- Basic knowledge of Rust and web development.
 
-Recomenda-se a utilização do Visual Studio Code com a extensão rust-analyzer.
+Visual Studio Code with the rust-analyzer extension is recommended.
 
-## 2. Configuração do ambiente
+## 2. Environment Setup
 
-Comece por clonar o repositório:
+Start by cloning the repository:
 
 ```bash
 git clone https://github.com/fabriciomichael/rustpress-web.git
+```

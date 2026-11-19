@@ -1,16 +1,16 @@
-//! Registo de eventos e diagnóstico do RustPress.
+//! RustPress event logging and diagnostics.
 //!
-//! O módulo fornece [`Logger`] e [`Level`]. É possível configurar o nível
-//! mínimo de uma instância independente ou o logger interno de [`crate::App`].
+//! This module provides [`Logger`] and [`Level`]. You can configure the minimum
+//! level of an independent instance or the internal logger of [`crate::App`].
 //!
-//! # Exemplo
+//! # Example
 //!
 //! ```
 //! use rustpress_web::{Level, Logger};
 //! let logger = Logger::new();
 //! logger.set_level(Level::Debug);
-//! logger.info("Servidor preparado");
-//! logger.warn("Configuração opcional ausente");
+//! logger.info("Server ready");
+//! logger.warn("Optional configuration missing");
 //! ```
 
 use is_terminal::IsTerminal;
@@ -19,50 +19,50 @@ use std::sync::{
     atomic::{AtomicU8, Ordering},
 };
 
-/// Nível de severidade de uma mensagem de log.
+/// Severity level of a log message.
 ///
-/// O nível configurado funciona como limite mínimo.
+/// The configured level acts as the minimum threshold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum Level {
-    /// Mensagens detalhadas para diagnóstico durante o desenvolvimento.
+    /// Detailed messages for diagnostics during development.
     Debug = 0,
-    /// Eventos informativos normais da aplicação.
+    /// Normal informational application events.
     Info = 1,
-    /// Situações inesperadas que não interrompem necessariamente a aplicação.
+    /// Unexpected situations that do not necessarily interrupt the application.
     Warn = 2,
-    /// Falhas que exigem atenção ou tratamento.
+    /// Failures that require attention or handling.
     Error = 3,
 }
 
-/// Logger leve para diagnóstico de aplicações RustPress.
+/// Lightweight logger for RustPress application diagnostics.
 ///
-/// Clones partilham o nível de registo da instância original; cada chamada a
-/// [`Logger::new`] cria uma configuração independente.
+/// Clones share the logging level of the original instance; each call to
+/// [`Logger::new`] creates an independent configuration.
 #[derive(Debug, Clone)]
 pub struct Logger {
     min_level: Arc<AtomicU8>,
 }
 
 impl Logger {
-    /// Cria um novo logger com nível mínimo INFO.
+    /// Creates a new logger with an INFO minimum level.
     pub fn new() -> Self {
         Self {
             min_level: Arc::new(AtomicU8::new(Level::Info as u8)),
         }
     }
 
-    /// Define o nível mínimo de registo.
+    /// Sets the minimum logging level.
     pub fn set_level(&self, level: Level) {
         self.min_level.store(level as u8, Ordering::Relaxed);
     }
 
-    /// Verifica se uma mensagem deve ser apresentada.
+    /// Checks whether a message should be displayed.
     fn should_log(&self, level: Level) -> bool {
         (level as u8) >= self.min_level.load(Ordering::Relaxed)
     }
 
-    /// Regista uma mensagem.
+    /// Logs a message.
     fn log(&self, level: Level, message: &str) {
         if !self.should_log(level) {
             return;
@@ -93,22 +93,22 @@ impl Logger {
         }
     }
 
-    /// Regista uma mensagem de diagnóstico.
+    /// Logs a diagnostic message.
     pub fn debug(&self, message: &str) {
         self.log(Level::Debug, message);
     }
 
-    /// Regista uma informação.
+    /// Logs an informational message.
     pub fn info(&self, message: &str) {
         self.log(Level::Info, message);
     }
 
-    /// Regista um aviso.
+    /// Logs a warning.
     pub fn warn(&self, message: &str) {
         self.log(Level::Warn, message);
     }
 
-    /// Regista um erro.
+    /// Logs an error.
     pub fn error(&self, message: &str) {
         self.log(Level::Error, message);
     }
@@ -120,7 +120,7 @@ impl Default for Logger {
     }
 }
 
-/// Obtém a data e hora actual em UTC.
+/// Gets the current date and time in UTC.
 fn current_timestamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -132,7 +132,7 @@ fn current_timestamp() -> String {
     format_timestamp(timestamp)
 }
 
-/// Converte um timestamp Unix para YYYY-MM-DD HH:MM:SS.
+/// Converts a Unix timestamp to YYYY-MM-DD HH:MM:SS.
 fn format_timestamp(timestamp: u64) -> String {
     let days = (timestamp / 86_400) as i64;
     let seconds = timestamp % 86_400;

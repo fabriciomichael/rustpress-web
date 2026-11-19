@@ -8,14 +8,14 @@ use uuid::Uuid;
 
 use super::{UploadConfig, UploadError, UploadedFile};
 
-/// Resultado do processamento de um pedido multipart.
+/// Result of processing a multipart request.
 #[derive(Debug, Default)]
 pub(crate) struct MultipartData {
     pub(crate) fields: Vec<(String, String)>,
     pub(crate) files: Vec<UploadedFile>,
 }
 
-/// Remove ficheiros temporários ou definitivos caso o processamento falhe.
+/// Removes temporary or permanent files if processing fails.
 struct UploadCleanup {
     paths: Vec<PathBuf>,
 }
@@ -48,7 +48,7 @@ impl Drop for UploadCleanup {
     }
 }
 
-/// Processa um corpo `multipart/form-data`.
+/// Processes a `multipart/form-data` body.
 pub(crate) async fn process(
     body: Bytes,
     boundary: &str,

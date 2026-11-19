@@ -1,6 +1,6 @@
 ﻿use std::path::{Path, PathBuf};
 
-/// Representa um ficheiro recebido através de uma requisição multipart.
+/// Represents a file received through a multipart request.
 #[derive(Debug, Clone)]
 pub struct UploadedFile {
     field_name: String,
@@ -12,7 +12,7 @@ pub struct UploadedFile {
 }
 
 impl UploadedFile {
-    /// Cria uma representação de ficheiro recebido.
+    /// Creates a representation of a received file.
     pub(crate) fn new(
         field_name: String,
         original_name: Option<String>,
@@ -31,32 +31,32 @@ impl UploadedFile {
         }
     }
 
-    /// Devolve o nome do campo do formulário que enviou o ficheiro.
+    /// Returns the name of the form field that sent the file.
     pub fn field_name(&self) -> &str {
         &self.field_name
     }
 
-    /// Devolve o nome original fornecido pelo cliente.
+    /// Returns the original name provided by the client.
     pub fn original_name(&self) -> Option<&str> {
         self.original_name.as_deref()
     }
 
-    /// Devolve o nome utilizado no armazenamento.
+    /// Returns the name used for storage.
     pub fn stored_name(&self) -> &str {
         &self.stored_name
     }
 
-    /// Devolve o caminho do ficheiro armazenado.
+    /// Returns the path of the stored file.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Devolve o tipo MIME declarado pelo cliente.
+    /// Returns the MIME type declared by the client.
     pub fn content_type(&self) -> Option<&str> {
         self.content_type.as_deref()
     }
 
-    /// Devolve o tamanho do ficheiro em bytes.
+    /// Returns the file size in bytes.
     pub fn size(&self) -> u64 {
         self.size
     }

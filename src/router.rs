@@ -1,8 +1,8 @@
-//! Correspondência de rotas e despacho de pedidos.
+//! Route matching and request dispatch.
 //!
-//! O router é um componente interno: armazena handlers por método e padrão
-//! de caminho, extrai parâmetros dinâmicos, executa middlewares e encaminha
-//! erros para o handler global configurado em [`crate::App`].
+//! The router is an internal component: it stores handlers by method and path
+//! pattern, extracts dynamic parameters, executes middlewares, and forwards
+//! errors to the global handler configured in [`crate::App`].
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -32,17 +32,17 @@ use crate::{
 
 const MAX_BODY_SIZE: usize = 1024 * 1024;
 
-/// Tipo que representa um handler de rota.
+/// Type that represents a route handler.
 ///
-/// Um handler recebe a requisição processada pelo framework e a resposta em
-/// construção e devolve a resposta final a enviar ao cliente.
+/// A handler receives the request processed by the framework and the response
+/// under construction, then returns the final response to send to the client.
 pub(crate) type Handler =
     Arc<dyn Fn(Request, Response) -> Result<Response, HandlerError> + Send + Sync>;
 
-/// Future devolvida por um handler WebSocket.
+/// Future returned by a WebSocket handler.
 pub(crate) type WebSocketFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 
-/// Handler responsável por processar uma ligação WebSocket.
+/// Handler responsible for processing a WebSocket connection.
 pub(crate) type WebSocketHandler =
     Arc<dyn Fn(Request, crate::WebSocket) -> WebSocketFuture + Send + Sync>;
 
@@ -55,10 +55,10 @@ struct RouteEntry {
 type MatchedRoute = (String, RouteEntry, Vec<(String, String)>);
 type MatchedWebSocketRoute = (String, WebSocketHandler, Vec<(String, String)>);
 
-/// Tipo que representa o handler global de erros.
+/// Type that represents the global error handler.
 type ErrorHandler = Arc<dyn Fn(&HandlerError, &crate::RequestContext) -> Response + Send + Sync>;
 
-/// Tipo que representa um middleware da cadeia de execução.
+/// Type that represents a middleware in the execution chain.
 pub(crate) type Middleware = Arc<dyn Fn(&Request) -> MiddlewareResult + Send + Sync>;
 
 type RouteKey = (Method, String);
@@ -74,11 +74,11 @@ struct SessionState {
     config: SessionConfig,
 }
 
-/// Responsável por guardar rotas, processar padrões e disparar middlewares.
+/// Responsible for storing routes, processing patterns, and triggering middlewares.
 ///
-/// A estrutura é interna ao framework e funciona como o componente central de
-/// roteamento. Cada rota é armazenada por método e caminho, e a correspondência
-/// é executada no momento em que cada pedido HTTP chega ao servidor.
+/// This structure is internal to the framework and serves as the central routing
+/// component. Each route is stored by method and path, and matching is performed
+/// whenever an HTTP request reaches the server.
 #[derive(Clone, Default)]
 pub(crate) struct Router {
     routes: HashMap<RouteKey, RouteEntry>,
@@ -94,7 +94,7 @@ pub(crate) struct Router {
 }
 
 impl Router {
-    /// Cria um router vazio.
+    /// Creates an empty router.
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -103,7 +103,7 @@ impl Router {
         self.enable_sessions_with_store(config, MemoryStore::new());
     }
 
-    /// Activa a gestão de sessões com um armazenamento personalizado.
+    /// Enables session management with custom storage.
     pub(crate) fn enable_sessions_with_store<S>(&mut self, config: SessionConfig, store: S)
     where
         S: SessionStore + 'static,
@@ -115,15 +115,15 @@ impl Router {
             config,
         });
     }
-    /// Activa o processamento de uploads no router.
+    /// Enables upload processing in the router.
     pub(crate) fn enable_uploads(&mut self, config: UploadConfig) {
         self.uploads = Some(config);
     }
 
-    /// Regista uma nova rota no router.
+    /// Registers a new route in the router.
     ///
-    /// O path pode conter segmentos dinâmicos com o prefixo `:`, por exemplo
-    /// `/utilizadores/:id`.
+    /// The path can contain dynamic segments prefixed with `:`, for example
+    /// `/users/:id`.
     #[cfg(test)]
     pub(crate) fn add<F>(&mut self, method: Method, path: &str, handler: F) -> Result<(), String>
     where
@@ -134,7 +134,7 @@ impl Router {
         })
     }
 
-    /// Regista uma rota cujo handler pode devolver um erro.
+    /// Registers a route whose handler may return an error.
     pub(crate) fn add_fallible<F>(
         &mut self,
         method: Method,
@@ -157,9 +157,9 @@ impl Router {
         Ok(())
     }
 
-    /// Regista uma nova rota WebSocket.
+    /// Registers a new WebSocket route.
     ///
-    /// O path deve ser único entre as rotas WebSocket.
+    /// The path must be unique among WebSocket routes.
     pub(crate) fn add_websocket<F, Fut>(&mut self, path: &str, handler: F) -> Result<(), String>
     where
         F: Fn(Request, crate::WebSocket) -> Fut + Send + Sync + 'static,
@@ -182,14 +182,14 @@ impl Router {
         Ok(())
     }
 
-    /// Regista um conjunto de rotas de grupo de forma atómica.
+    /// Registers a group of routes atomically.
     pub(crate) fn add_group_routes(
         &mut self,
         routes: Vec<(Method, String, Handler, Vec<Middleware>)>,
     ) -> Result<(), String> {
         let mut pending_keys = HashSet::with_capacity(routes.len());
 
-        // Primeira fase: validar todas as rotas sem modificar o Router.
+        // First phase: validate all routes without modifying the Router.
         for (method, path, _, _) in &routes {
             Self::validate_route(path)?;
 
@@ -206,7 +206,7 @@ impl Router {
             }
         }
 
-        // Segunda fase: registar todas as rotas.
+        // Second phase: register all routes.
         for (method, path, handler, middlewares) in routes {
             self.routes.insert(
                 (method, path),
@@ -220,7 +220,7 @@ impl Router {
         Ok(())
     }
 
-    /// Regista o handler global para erros das rotas.
+    /// Registers the global handler for route errors.
     pub(crate) fn set_error_handler<F>(&mut self, handler: F)
     where
         F: Fn(&HandlerError, &crate::RequestContext) -> Response + Send + Sync + 'static,
@@ -228,8 +228,7 @@ impl Router {
         self.error_handler = Some(Arc::new(handler));
     }
 
-    /// Regista o handler global para tratar erros durante o processamento
-    /// dos pedidos HTTP.
+    /// Registers the global handler for errors during HTTP request processing.
     fn handle_error(&self, error: &HandlerError, context: &crate::RequestContext) -> Response {
         self.logger.error(&format!(
             "Erro HTTP {}: {}",
@@ -275,12 +274,12 @@ impl Router {
         }
     }
 
-    /// Compara um padrão de rota com o caminho da requisição.
+    /// Matches a route pattern against the request path.
     ///
-    /// Quando encontra um marcador `:nome`, extrai o valor correspondente e
-    /// devolve uma lista de pares `(nome, valor)` para uso em `Request::param`.
+    /// When a `:name` marker is found, extracts the corresponding value and
+    /// returns a list of `(name, value)` pairs for use in `Request::param`.
     fn match_path(route: &str, path: &str) -> Option<Vec<(String, String)>> {
-        // Rejeita segmentos vazios no interior dos caminhos.
+        // Reject empty segments within paths.
         if route.contains("//") || path.contains("//") {
             return None;
         }
@@ -297,12 +296,12 @@ impl Router {
 
         for (route_part, path_part) in route_parts.iter().zip(path_parts.iter()) {
             if let Some(name) = route_part.strip_prefix(':') {
-                // O parâmetro deve ter um nome e um valor.
+                // The parameter must have a name and a value.
                 if name.is_empty() || path_part.is_empty() {
                     return None;
                 }
 
-                // Não permite nomes de parâmetros repetidos.
+                // Repeated parameter names are not allowed.
                 if params
                     .iter()
                     .any(|(existing_name, _)| existing_name == name)
@@ -319,17 +318,17 @@ impl Router {
         Some(params)
     }
 
-    /// Define a prioridade de uma rota.
-    /// Segmentos estáticos têm prioridade sobre segmentos dinâmicos.
+    /// Defines a route's priority.
+    /// Static segments take priority over dynamic segments.
     fn route_specificity(route: &str) -> Vec<u8> {
         route
             .trim_matches('/')
             .split('/')
             .map(|segment| {
                 if segment.starts_with(':') {
-                    0 // Segmento dinâmico
+                    0 // Dynamic segment
                 } else {
-                    1 // Segmento estático
+                    1 // Static segment
                 }
             })
             .collect()
@@ -361,7 +360,7 @@ impl Router {
     }
 
     fn find_route(&self, method: &Method, path: &str) -> Option<MatchedRoute> {
-        // Primeiro, procura uma correspondência exacta do método.
+        // First, look for an exact method match.
         let exact_match = self
             .routes
             .iter()
@@ -383,7 +382,7 @@ impl Router {
             return exact_match;
         }
 
-        // Se não existir uma rota HEAD explícita, tenta uma rota GET.
+        // If no explicit HEAD route exists, try a GET route.
         if *method == Method::HEAD {
             return self
                 .routes
@@ -420,7 +419,7 @@ impl Router {
             })
     }
 
-    /// Processa um pedido de upgrade para uma rota WebSocket.
+    /// Processes an upgrade request for a WebSocket route.
     async fn handle_websocket(
         &self,
         mut incoming: HyperRequest<Incoming>,
@@ -433,7 +432,7 @@ impl Router {
         let version = incoming.version();
         let headers = incoming.headers().clone();
 
-        // Cria o pedido interno preservando os metadados HTTP.
+        // Create the internal request while preserving HTTP metadata.
         let mut builder = HyperRequest::builder()
             .method(method)
             .uri(uri)
@@ -456,7 +455,7 @@ impl Router {
         let mut request = Request::new(inner, params);
         let context = request.context();
 
-        // Carrega a sessão associada ao pedido.
+        // Load the session associated with the request.
         let session_id = self.extract_session_id(&headers);
 
         let session = match self.load_session(session_id.as_deref()) {
@@ -477,7 +476,7 @@ impl Router {
             request.set_session(session);
         }
 
-        // Executa os middlewares globais.
+        // Execute the global middlewares.
         for middleware in &self.middlewares {
             let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 middleware(&request)
@@ -508,7 +507,7 @@ impl Router {
             }
         }
 
-        // Valida e prepara o handshake WebSocket.
+        // Validate and prepare the WebSocket handshake.
         let (mut handshake, upgrade) = match hyper_tungstenite::upgrade(&mut incoming, None) {
             Ok(result) => result,
             Err(_) => {
@@ -519,7 +518,7 @@ impl Router {
             }
         };
 
-        // Prepara e persiste a sessão antes de enviar o cookie.
+        // Prepare and persist the session before sending the cookie.
         if let (Some(session), Some(session_state)) = (request.session(), self.session.as_ref()) {
             let cookie_header = {
                 let mut session = match session.lock() {
@@ -580,8 +579,8 @@ impl Router {
             }
         }
 
-        // Guarda as referências necessárias para persistir a sessão
-        // quando o handler WebSocket terminar.
+        // Save the references needed to persist the session
+        // when the WebSocket handler finishes.
         let session = request.session();
         let manager = self
             .session
@@ -625,19 +624,19 @@ impl Router {
         )
     }
 
-    /// Processa uma requisição HTTP e devolve a resposta correspondente.
+    /// Processes an HTTP request and returns the corresponding response.
     ///
-    /// A lógica faz as seguintes etapas:
-    /// 1. obtém método e caminho;
-    /// 2. procura uma rota compatível;
-    /// 3. extrai parâmetros da rota;
-    /// 4. executa middleware;
-    /// 5. chama o handler ou devolve 404.
+    /// The logic performs these steps:
+    /// 1. Gets the method and path;
+    /// 2. Searches for a matching route;
+    /// 3. Extracts route parameters;
+    /// 4. Executes middlewares;
+    /// 5. Calls the handler or returns 404.
     pub(crate) async fn handle(
         &self,
         request: HyperRequest<Incoming>,
     ) -> HyperResponse<Full<Bytes>> {
-        // Intercepta pedidos de upgrade destinados a rotas WebSocket.
+        // Intercept upgrade requests intended for WebSocket routes.
         if hyper_tungstenite::is_upgrade_request(&request) {
             let path = request.uri().path().to_owned();
 
@@ -660,22 +659,22 @@ impl Router {
             None => Vec::new(),
         };
 
-        // Extrai o identificador antes de transferir a requisição HTTP.
+        // Extract the identifier before transferring the HTTP request.
         let session_id = self.extract_session_id(&parts.headers);
 
-        // Guarda o Content-Type antes de transferir os metadados HTTP.
+        // Save the Content-Type before transferring the HTTP metadata.
         let content_type = parts
             .headers
             .get(CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
 
-        // Cria o Request com os metadados e um corpo inicialmente vazio.
+        // Create the Request with metadata and an initially empty body.
         let inner = HyperRequest::from_parts(parts, Bytes::new());
         let mut request = Request::new(inner, params);
         let context = request.context();
 
-        // Carrega a sessão.
+        // Load the session.
         let session = match self.load_session(session_id.as_deref()) {
             Ok(session) => session,
 
@@ -699,7 +698,7 @@ impl Router {
             request.set_session_manager(Arc::clone(&session.manager));
         }
 
-        // Identifica pedidos multipart/form-data.
+        // Identify multipart/form-data requests.
 
         let is_multipart = content_type.as_deref().is_some_and(|value| {
             value.split(';').next().is_some_and(|media_type| {
@@ -709,8 +708,8 @@ impl Router {
             })
         });
 
-        // Pedidos normais mantêm o limite de 1 MiB.
-        // Uploads respeitam o limite definido em UploadConfig.
+        // Normal requests retain the 1 MiB limit.
+        // Uploads respect the limit defined in UploadConfig.
         let max_body_size = if is_multipart {
             self.uploads
                 .as_ref()
@@ -720,8 +719,8 @@ impl Router {
             MAX_BODY_SIZE
         };
 
-        // Lemos o corpo antes dos middlewares para permitir que eles
-        // analisem dados da requisição, como tokens CSRF enviados por formulário.
+        // Read the body before middlewares so they can analyze request data,
+        // such as CSRF tokens sent through a form.
         if matched.is_some() {
             if is_multipart && self.uploads.is_none() {
                 let error = HandlerError::with_status(
@@ -923,7 +922,7 @@ impl Router {
         let mut response = match matched {
             Some((entry, _)) => {
                 let handler = entry.handler;
-                // Guardamos a sessão antes de mover Request para o handler.
+                // Save the session before moving Request to the handler.
                 let session = request.session();
 
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -983,11 +982,11 @@ impl Router {
         response
     }
 
-    /// Adiciona um middleware ao router.
+    /// Adds a middleware to the router.
     ///
-    /// Middleware globais são executados antes da rota final e permitem tarefas
-    /// como autenticação, logging, validação de acessos e interceptação de
-    /// requisições.
+    /// Global middlewares run before the final route and enable tasks
+    /// such as authentication, logging, access validation, and request
+    /// interception.
     pub(crate) fn use_middleware<F>(&mut self, middleware: F)
     where
         F: Fn(&Request) -> Option<Response> + Send + Sync + 'static,
@@ -1064,7 +1063,7 @@ impl Router {
             .flatten()
     }
 
-    /// Recupera a sessão associada a um pedido HTTP.
+    /// Retrieves the session associated with an HTTP request.
     fn load_session(
         &self,
         session_id: Option<&str>,
@@ -1076,7 +1075,7 @@ impl Router {
 
         Ok(Some(Arc::new(Mutex::new(session))))
     }
-    /// Finaliza a resposta HTTP e persiste a sessão, quando necessário.
+    /// Finalizes the HTTP response and persists the session when necessary.
     fn finalize_response(
         &self,
         mut response: Response,
@@ -1297,8 +1296,8 @@ mod tests {
             .find_route(&Method::GET, "/a/b/c")
             .expect("Uma rota deveria ser encontrada");
 
-        // Ambas têm dois segmentos estáticos.
-        // O desempate é feito pela ordem lexicográfica do caminho.
+        // Both have two static segments.
+        // The tie is resolved by the lexicographic path order.
         assert_eq!(selected_path, "/a/b/:x");
     }
 
@@ -1426,7 +1425,7 @@ mod tests {
             .find_route(&Method::HEAD, "/utilizadores")
             .expect("Deveria encontrar a rota HEAD");
 
-        // Compara a identidade dos handlers registados.
+        // Compare the identities of the registered handlers.
         let head_entry = router
             .routes
             .get(&(Method::HEAD, "/utilizadores".to_owned()))
@@ -1471,9 +1470,8 @@ mod tests {
             })
             .expect("A rota deveria ser registada");
 
-        // Neste módulo, podemos testar directamente o registo
-        // do middleware, mas handle() exige uma requisição Hyper
-        // com um corpo Incoming.
+        // In this module, we can directly test middleware registration,
+        // but handle() requires a Hyper request with an Incoming body.
     }
 
     #[tokio::test]
@@ -1493,7 +1491,7 @@ mod tests {
         let session_id = session.id().to_string();
         let session = Arc::new(Mutex::new(session));
 
-        // Guarda os dados recebidos pelo handler global.
+        // Save the data received by the global handler.
         let captured = Arc::new(Mutex::new(None));
         let captured_handler = Arc::clone(&captured);
 
@@ -1517,7 +1515,7 @@ mod tests {
 
         let hyper_response = router.finalize_or_error_response(response, Some(session), &context);
 
-        // A resposta deve ser a produzida pelo handler global.
+        // The response should be the one produced by the global handler.
         assert_eq!(hyper_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
         let body = hyper_response.into_body();
@@ -1525,7 +1523,7 @@ mod tests {
 
         assert_eq!(bytes.as_ref(), "Erro tratado globalmente".as_bytes());
 
-        // Verifica os dados recebidos pelo handler global.
+        // Verify the data received by the global handler.
         let captured = captured.lock().unwrap();
         let (status, details, has_source, path) = captured
             .as_ref()
@@ -1536,7 +1534,7 @@ mod tests {
         assert!(*has_source);
         assert_eq!(path, "/teste");
 
-        // A sessão não deve ser guardada quando a criação do cookie falha.
+        // The session should not be saved when cookie creation fails.
         let stored_session = manager.load(&session_id).unwrap();
 
         assert!(!stored_session.contains("user"));
@@ -1599,7 +1597,7 @@ mod tests {
         assert!(*has_source);
         assert_eq!(path, "/teste");
 
-        // A sessão destruída deve continuar removida do armazenamento.
+        // The destroyed session should remain removed from storage.
         let stored_session = manager.load(&session_id).unwrap();
 
         assert!(!stored_session.contains("user"));

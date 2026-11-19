@@ -1,53 +1,53 @@
 use std::fmt;
 
-/// Erros relacionados com a configuração e recepção de ficheiros.
+/// Errors related to file configuration and receiving uploads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UploadError {
-    /// O directório de armazenamento não foi definido.
+    /// The storage directory was not defined.
     EmptyStorageDirectory,
 
-    /// O tamanho máximo total do pedido é inválido.
+    /// The maximum total request size is invalid.
     InvalidTotalSize,
 
-    /// O tamanho máximo de ficheiro é inválido.
+    /// The maximum file size is invalid.
     InvalidFileSize,
 
-    /// O número máximo de ficheiros é inválido.
+    /// The maximum number of files is invalid.
     InvalidFileCount,
 
-    /// O número máximo de campos é inválido.
+    /// The maximum number of fields is invalid.
     InvalidFieldCount,
 
-    /// O tamanho máximo de campo é inválido.
+    /// The maximum field size is invalid.
     InvalidFieldSize,
 
-    /// Ocorreu um erro ao criar, escrever ou mover um ficheiro.
+    /// An error occurred while creating, writing, or moving a file.
     Storage(String),
 
-    /// O corpo multipart não pôde ser processado.
+    /// The multipart body could not be processed.
     Multipart(String),
 
-    /// O número máximo de ficheiros foi excedido.
+    /// The maximum number of files was exceeded.
     TooManyFiles {
-        /// Limite configurado de ficheiros.
+        /// Configured file limit.
         limit: usize,
     },
 
-    /// O tamanho máximo de um ficheiro foi excedido.
+    /// The maximum size of a file was exceeded.
     FileSizeExceeded {
-        /// Limite configurado em bytes.
+        /// Configured limit in bytes.
         limit: u64,
     },
 
-    /// O número máximo de campos foi excedido.
+    /// The maximum number of fields was exceeded.
     TooManyFields {
-        /// Limite configurado de campos.
+        /// Configured field limit.
         limit: usize,
     },
 
-    /// O tamanho máximo de um campo foi excedido.
+    /// The maximum size of a field was exceeded.
     FieldSizeExceeded {
-        /// Limite configurado em bytes.
+        /// Configured limit in bytes.
         limit: u64,
     },
 }
